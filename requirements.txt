@@ -1,0 +1,32 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Search & RAG
+httpx>=0.28.0
+requests>=2.32.0
+qdrant-client>=1.18.0
+PyMuPDF>=1.25.0
+numpy>=1.26.0
+
+# LLM Providers
+ollama>=0.4.0
+google-genai>=0.6.0
+google-generativeai>=0.8.0
+
+# Web scraping helpers
+tenacity>=9.0.0
+tqdm>=4.68.0
+
+# Utilities
+python-dotenv>=1.0.0
+PyYAML>=6.0.0
+
+# Optional — FastEmbed dense embeddings (much better accuracy than TF-IDF)
+# Requires onnxruntime, which needs a compatible platform:
+#   Linux x86_64: pip install fastembed
+#   macOS 14+ arm64: pip install fastembed
+#   Windows: pip install fastembed
+# Intel Mac + macOS <14: FastEmbed will NOT install; falls back to TF-IDF automatically.
+fastembed>=0.5.0

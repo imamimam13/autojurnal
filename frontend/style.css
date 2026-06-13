@@ -1,0 +1,206 @@
+body {
+    background: #0f0f1a;
+    min-height: 100vh;
+}
+
+.navbar {
+    background: #1a1a2e !important;
+}
+
+.card {
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+}
+
+.card-header {
+    background: #16162a;
+    border-bottom: 1px solid #2a2a4a;
+}
+
+.form-control, .form-select {
+    background: #0f0f1a;
+    border: 1px solid #2a2a4a;
+    color: #e0e0e0;
+}
+
+.form-control:focus, .form-select:focus {
+    background: #0f0f1a;
+    border-color: #6c5ce7;
+    box-shadow: 0 0 0 0.2rem rgba(108, 92, 231, 0.25);
+    color: #e0e0e0;
+}
+
+.btn-primary {
+    background: #6c5ce7;
+    border-color: #6c5ce7;
+}
+
+.btn-primary:hover {
+    background: #5a4bd1;
+    border-color: #5a4bd1;
+}
+
+.paper-item {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #2a2a4a;
+    transition: background 0.2s;
+}
+
+.paper-item:hover {
+    background: #222244;
+}
+
+.paper-item:last-child {
+    border-bottom: none;
+}
+
+.paper-item.selected {
+    background: #1a1a3a;
+    border-left: 3px solid #6c5ce7;
+}
+
+.paper-item .form-check-input {
+    cursor: pointer;
+    margin-top: 0.25rem;
+}
+
+.paper-item .paper-title {
+    font-weight: 500;
+    color: #c8c8ff;
+}
+
+.paper-item .paper-meta {
+    font-size: 0.85rem;
+    color: #888;
+}
+
+.paper-item .doi-badge {
+    color: #6c5ce7;
+    font-size: 0.8rem;
+}
+
+.paper-item .no-doi {
+    color: #666;
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+.paper-item .oa-link,
+.paper-item .paper-link {
+    color: #888;
+    text-decoration: none;
+    font-size: 0.8rem;
+}
+
+.paper-item .oa-link:hover,
+.paper-item .paper-link:hover {
+    color: #6c5ce7;
+}
+
+.paper-item .paper-link {
+    color: #4ecdc4;
+}
+
+.paper-item .paper-abstract {
+    font-size: 0.9rem;
+    color: #aaa;
+    margin-top: 0.5rem;
+    display: none;
+}
+
+.paper-item .paper-abstract.expanded {
+    display: block;
+}
+
+#journal-content {
+    line-height: 1.8;
+    font-size: 0.95rem;
+}
+
+#journal-content h1 {
+    font-size: 1.6rem;
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+    color: #c8c8ff;
+    border-bottom: 1px solid #2a2a4a;
+    padding-bottom: 0.5rem;
+}
+
+#journal-content h2 {
+    font-size: 1.3rem;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    color: #b8b8ee;
+}
+
+#journal-content h3 {
+    font-size: 1.1rem;
+    margin-top: 1.2rem;
+    margin-bottom: 0.5rem;
+    color: #a8a8dd;
+}
+
+#journal-content p {
+    margin-bottom: 0.75rem;
+    text-align: justify;
+}
+
+#journal-content ul, #journal-content ol {
+    margin-bottom: 0.75rem;
+}
+
+#journal-content li {
+    margin-bottom: 0.25rem;
+}
+
+.para-wrapper {
+    position: relative;
+    transition: background 0.2s;
+    border-radius: 4px;
+    padding: 2px 0;
+}
+
+.para-wrapper:hover {
+    background: rgba(108, 92, 231, 0.08);
+}
+
+.para-controls {
+    position: absolute;
+    right: 0;
+    top: 0;
+    display: none;
+    gap: 2px;
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 4px;
+    padding: 2px;
+    z-index: 10;
+}
+
+.para-wrapper:hover .para-controls {
+    display: flex;
+}
+
+.btn-para {
+    background: none;
+    border: none;
+    color: #888;
+    padding: 2px 6px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    border-radius: 3px;
+    transition: all 0.15s;
+}
+
+.btn-para:hover {
+    background: #6c5ce7;
+    color: #fff;
+}
+
+.para-edit-textarea {
+    min-height: 80px;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin-bottom: 0.5rem;
+    resize: vertical;
+}

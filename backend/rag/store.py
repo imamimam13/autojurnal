@@ -1,42 +1,101 @@
-import re
+import json
 import math
-import numpy as np
+import re
 from collections import Counter
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
+import numpy as np
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
 
 
-COLLECTION_NAME = "papers"
+COLLECTION_PREFIX = "papers_"
 MAX_DIM = 50000
+DATA_DIR = Path.home() / ".autojurnal"
+
+
+def _collection_name(hash_str: str) -> str:
+    return f"{COLLECTION_PREFIX}{hash_str}"
+
+
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"\w+", text.lower())
 
 
 class ChunkStore:
     def __init__(self):
-        self.client = QdrantClient(":memory:")
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.client = QdrantClient(path=str(DATA_DIR / "qdrant_rag"))
         self.chunks: list[dict[str, Any]] = []
         self._built = False
-        self.paper_hash: str | None = None
+        self.paper_hash: Optional[str] = None
         self._generation_count = 0
 
         self._embed_model = None
         self._use_fastembed = False
 
         # TF-IDF state (only used when FastEmbed unavailable)
-        self._vocab: dict[str, int] | None = None
-        self._vectors: np.ndarray | None = None
+        self._vocab: Optional[dict[str, int]] = None
+        self._vectors: Optional[np.ndarray] = None
 
         self._try_init_fastembed()
+        self._load_hash()
 
-    def _try_init_fastembed(self):
-        try:
-            from fastembed import TextEmbedding
-            self._embed_model = TextEmbedding()
-            self._use_fastembed = True
-            print("[RAG] Using FastEmbed for embeddings")
-        except Exception as e:
-            print(f"[RAG] FastEmbed unavailable ({e}), falling back to TF-IDF")
+    # ---- Persistence helpers ----
+
+    def _hash_path(self) -> Path:
+        return DATA_DIR / "rag_paper_hash.json"
+
+    def _save_hash(self):
+        data = {"paper_hash": self.paper_hash}
+        self._hash_path().write_text(json.dumps(data))
+        print(f"[RAG] Saved paper_hash: {self.paper_hash[:12] if self.paper_hash else 'None'}...")
+
+    def _load_hash(self):
+        path = self._hash_path()
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                h = data.get("paper_hash")
+                if h:
+                    col = _collection_name(h)
+                    if self.client.collection_exists(col):
+                        self.paper_hash = h
+                        print(f"[RAG] Restored paper_hash: {h[:12]}... (collection exists)")
+                        # Rebuild in-memory chunks
+                        self._restore_from_collection(col)
+                    else:
+                        print(f"[RAG] Stored paper_hash {h[:12]}... but collection not found, starting fresh")
+            except Exception as e:
+                print(f"[RAG] Error loading hash: {e}")
+
+    def _restore_from_collection(self, col: str):
+        scroll = self.client.scroll(
+            collection_name=col,
+            with_payload=True,
+            with_vectors=False,
+            limit=10000,
+        )
+        self.chunks = [pt.payload for pt in scroll[0]]
+        print(f"[RAG] Restored {len(self.chunks)} chunks from {col}")
+
+    def restore_if_exists(self, hash_str: str) -> bool:
+        """Check if a collection exists for the given hash and restore it.
+        Returns True if restored, False if not found."""
+        col = _collection_name(hash_str)
+        if self.client.collection_exists(col):
+            self._restore_from_collection(col)
+            self.paper_hash = hash_str
+            self._save_hash()
+            print(f"[RAG] Restored existing collection for hash {hash_str[:12]}...")
+            return True
+        return False
+
+    def _current_collection(self) -> Optional[str]:
+        if self.paper_hash:
+            return _collection_name(self.paper_hash)
+        return None
 
     def add_chunks(self, paper_index: int, chunks: list[str], metadata: dict | None = None):
         for i, text in enumerate(chunks):
@@ -49,24 +108,31 @@ class ChunkStore:
         self._built = False
 
     def clear(self):
-        self.client.delete_collection(COLLECTION_NAME)
         self.chunks.clear()
         self._vocab = None
         self._vectors = None
         self._built = False
         self.paper_hash = None
+        self._save_hash()
+        print("[RAG] In-memory state cleared (disk data preserved)")
+
+    def set_paper_hash(self, hash_str: str):
+        self.paper_hash = hash_str
+        self._save_hash()
 
     def __len__(self) -> int:
         return len(self.chunks)
 
     # ---- TF-IDF helpers ----
 
-    def _tokenize(self, text: str) -> list[str]:
-        return re.findall(r"\w+", text.lower())
-
     def _build_tfidf(self):
         n = len(self.chunks)
         if n == 0:
+            return
+
+        col = self._current_collection()
+        if not col:
+            print("[TF-IDF] No collection name (no paper_hash)")
             return
 
         self._vocab = None
@@ -76,7 +142,7 @@ class ChunkStore:
         all_tokens = set()
         tokenized = []
         for chunk in self.chunks:
-            tokens = self._tokenize(chunk["text"])
+            tokens = _tokenize(chunk["text"])
             tokenized.append(tokens)
             all_tokens.update(tokens)
 
@@ -111,23 +177,27 @@ class ChunkStore:
 
         self._vectors = vectors
 
-        if self.client.collection_exists(COLLECTION_NAME):
-            self.client.delete_collection(COLLECTION_NAME)
+        if self.client.collection_exists(col):
+            self.client.delete_collection(col)
         self.client.create_collection(
-            collection_name=COLLECTION_NAME,
+            collection_name=col,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
         points = [
             PointStruct(id=i, vector=v.tolist(), payload=self.chunks[i])
             for i, v in enumerate(vectors)
         ]
-        self.client.upsert(collection_name=COLLECTION_NAME, points=points)
+        self.client.upsert(collection_name=col, points=points)
         self._built = True
-        print(f"[TF-IDF] Built: dim={dim}, chunks={n}")
+        print(f"[TF-IDF] Built: dim={dim}, chunks={n} in '{col}'")
 
     def _search_tfidf(self, query: str, top_k: int, min_score: float) -> list[dict]:
-        query_tokens = self._tokenize(query)
+        query_tokens = _tokenize(query)
         if not query_tokens:
+            return []
+
+        col = self._current_collection()
+        if not col:
             return []
 
         dim = len(self._vocab)
@@ -145,7 +215,7 @@ class ChunkStore:
             qv = qv / q_norm
 
         results = self.client.query_points(
-            collection_name=COLLECTION_NAME,
+            collection_name=col,
             query=qv.tolist(),
             limit=top_k,
         )
@@ -157,9 +227,22 @@ class ChunkStore:
 
     # ---- FastEmbed helpers ----
 
+    def _try_init_fastembed(self):
+        try:
+            from fastembed import TextEmbedding
+            self._embed_model = TextEmbedding()
+            self._use_fastembed = True
+            print("[RAG] Using FastEmbed for embeddings")
+        except Exception as e:
+            print(f"[RAG] FastEmbed unavailable ({e}), falling back to TF-IDF")
+
     def _build_fastembed(self):
         n = len(self.chunks)
         if n == 0:
+            return
+
+        col = self._current_collection()
+        if not col:
             return
 
         self._built = False
@@ -168,24 +251,28 @@ class ChunkStore:
         embeddings = list(self._embed_model.embed(texts))
         dim = len(embeddings[0])
 
-        if self.client.collection_exists(COLLECTION_NAME):
-            self.client.delete_collection(COLLECTION_NAME)
+        if self.client.collection_exists(col):
+            self.client.delete_collection(col)
         self.client.create_collection(
-            collection_name=COLLECTION_NAME,
+            collection_name=col,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
         points = [
             PointStruct(id=i, vector=v.tolist(), payload=self.chunks[i])
             for i, v in enumerate(embeddings)
         ]
-        self.client.upsert(collection_name=COLLECTION_NAME, points=points)
+        self.client.upsert(collection_name=col, points=points)
         self._built = True
-        print(f"[FastEmbed] Built: dim={dim}, chunks={n}")
+        print(f"[FastEmbed] Built: dim={dim}, chunks={n} in '{col}'")
 
     def _search_fastembed(self, query: str, top_k: int, min_score: float) -> list[dict]:
+        col = self._current_collection()
+        if not col:
+            return []
+
         query_vec = list(self._embed_model.embed([query]))[0]
         results = self.client.query_points(
-            collection_name=COLLECTION_NAME,
+            collection_name=col,
             query=query_vec.tolist(),
             limit=top_k,
         )

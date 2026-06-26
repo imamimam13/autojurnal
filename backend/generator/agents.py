@@ -1,4 +1,6 @@
 import re
+import asyncio
+import json
 from typing import Optional
 from search.openalex import Paper
 from providers.base import LLMProvider
@@ -883,13 +885,25 @@ async def generate_multi_agent(
     template: Optional[dict] = None,
     has_data: bool = False,
     user_data: Optional[str] = None,
+    log_queue: Optional[asyncio.Queue] = None,
+    previous_works_ctx: str = "",
 ) -> tuple[str, dict]:
+
+    async def log(agent: str, msg: str, detail: str = ""):
+        line = f"[{agent}] {msg}"
+        print(line)
+        if log_queue:
+            await log_queue.put({
+                "type": "log", "agent": agent,
+                "message": msg, "detail": detail,
+            })
+
     tracker = TokenTracker()
     lang = "id" if language == "id" else "en"
 
     if template and template.get("sections"):
         section_order, headings = _template_to_sections(template, lang)
-        print(f"[Agent] Using template '{template.get('name', 'unnamed')}' with {len(section_order)} sections")
+        await log("Agent", f"Using template '{template.get('name', 'unnamed')}' with {len(section_order)} sections")
     else:
         section_order = DEFAULT_SECTION_ORDER
         headings = DEFAULT_SECTION_META[lang]
@@ -900,24 +914,26 @@ async def generate_multi_agent(
     paper_list = _get_paper_list(papers)
 
     # ---- Step 0: Methodology Analyst (runs once) ----
+    await log("Methodology Analyst", "Menentukan paradigma dan metode analisis...")
     methodology_sys = SYSTEM_PROMPTS["methodology_analyst"][lang]
     methodology_task = _methodology_prompt(lang, theme, paper_list, template)
     methodology_context = await tracker.run(provider, methodology_sys, methodology_task)
-    print(f"[Agent] Methodology Analyst done: {len(methodology_context)} chars")
-    print(f"[Agent] Methodology:\n{methodology_context}")
+    await log("Methodology Analyst", f"Selesai ({len(methodology_context)} chars)")
 
-    # Build template + methodology context to inject into every system prompt
+    # Build template + methodology + previous-works context
     template_ctx = ""
     if template:
         template_ctx = _format_template_sections(template, lang) + _format_template_constraints(template, lang) + "\n\n"
     template_ctx += f"METODOLOGI PENELITIAN:\n{methodology_context}\n\n" if lang == "id" else f"RESEARCH METHODOLOGY:\n{methodology_context}\n\n"
+    if previous_works_ctx:
+        template_ctx += previous_works_ctx + "\n\n"
 
     all_content = ""
     prev_titles = ""
 
     for section_key in section_order:
         heading = headings[section_key]
-        print(f"[Agent] Processing section: {section_key} ({heading})")
+        await log("Pipeline", f"Memproses bagian: {section_key} ({heading})")
 
         query_template = RAG_QUERIES.get(section_key)
         if query_template:
@@ -928,56 +944,66 @@ async def generate_multi_agent(
         rag = _rag_context(papers, query) if query else ""
 
         # 1. Lead Researcher
+        await log("Lead Researcher", "Membuat rencana penelitian...")
         researcher_sys = template_ctx + SYSTEM_PROMPTS["lead_researcher"][lang]
         task = _researcher_prompt(lang, section_key, theme, heading, rag, prev_titles)
         research_plan = await tracker.run(provider, researcher_sys, task)
-        print(f"[Agent] Lead Researcher done: {len(research_plan)} chars")
+        await log("Lead Researcher", f"Rencana selesai ({len(research_plan)} chars)")
 
         # 2. Source Reviewer
+        await log("Source Reviewer", "Mensintesis temuan dari sumber...")
         reviewer_sys = template_ctx + SYSTEM_PROMPTS["source_reviewer"][lang]
         task = _reviewer_prompt(lang, section_key, theme, heading, research_plan, rag)
         findings = await tracker.run(provider, reviewer_sys, task)
-        print(f"[Agent] Source Reviewer done: {len(findings)} chars")
+        await log("Source Reviewer", f"Sintesis selesai ({len(findings)} chars)")
 
         # 3. Lead Writer (first draft)
+        await log("Lead Writer", "Menulis draf pertama...")
         writer_sys = template_ctx + SYSTEM_PROMPTS["lead_writer"][lang]
         task = _writer_prompt(lang, section_key, theme, heading, research_plan, findings, word_target, prev_titles, paper_list, has_data, user_data)
         section_content = await tracker.run(provider, writer_sys, task)
-        print(f"[Agent] Lead Writer (draft) done: {len(section_content)} chars")
+        await log("Lead Writer", f"Draf selesai ({len(section_content)} chars)")
 
         # 3b. Lead Storyteller (enrich descriptiveness)
+        await log("Lead Storyteller", "Memperkaya dengan elemen naratif...")
         story_sys = template_ctx + SYSTEM_PROMPTS["lead_story"][lang]
         story_task = _lead_story_prompt(lang, section_key, theme, heading, section_content, methodology_context)
         section_content_storied = await tracker.run(provider, story_sys, story_task)
-        print(f"[Agent] Lead Storyteller (enrich) done: {len(section_content_storied)} chars")
+        await log("Lead Storyteller", f"Pengayaan selesai ({len(section_content_storied)} chars)")
 
         # 4. Peer Reviewer
+        await log("Peer Reviewer", "Mengevaluasi naskah...")
         peer_sys = template_ctx + SYSTEM_PROMPTS["peer_reviewer"][lang]
         task = _peer_review_prompt(lang, theme, heading, research_plan, findings, section_content_storied)
         peer_review = await tracker.run(provider, peer_sys, task)
-        print(f"[Agent] Peer Reviewer done: {len(peer_review)} chars")
+        await log("Peer Reviewer", f"Review selesai ({len(peer_review)} chars)")
 
         # 5. Lead Researcher (revision)
+        await log("Lead Researcher", "Merevisi rencana berdasarkan review...")
         research_revision_task = _researcher_revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, prev_titles)
         research_plan = await tracker.run(provider, researcher_sys, research_revision_task)
-        print(f"[Agent] Lead Researcher (revised) done: {len(research_plan)} chars")
+        await log("Lead Researcher", f"Rencana revisi selesai ({len(research_plan)} chars)")
 
         # 6. Lead Writer (revision)
+        await log("Lead Writer", "Menulis draf revisi...")
         task = _revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, paper_list, prev_titles)
         section_content = await tracker.run(provider, writer_sys, task)
-        print(f"[Agent] Lead Writer (revised) done: {len(section_content)} chars")
+        await log("Lead Writer", f"Draf revisi selesai ({len(section_content)} chars)")
 
         # 6b. Lead Storyteller (revision enrich)
+        await log("Lead Storyteller", "Memperkaya revisi...")
         story_task = _lead_story_prompt(lang, section_key, theme, heading, section_content, methodology_context)
         section_content = await tracker.run(provider, story_sys, story_task)
-        print(f"[Agent] Lead Storyteller (revised enrich) done: {len(section_content)} chars")
+        await log("Lead Storyteller", "Pengayaan revisi selesai")
 
         # 7. Humanizer
+        await log("Humanizer", "Menghumanisasi naskah...")
         humanizer_sys = template_ctx + SYSTEM_PROMPTS["humanizer"][lang]
         task = _humanizer_prompt(lang, theme, heading, section_content)
         section_content = await tracker.run(provider, humanizer_sys, task)
-        print(f"[Agent] Humanizer done: {len(section_content)} chars")
+        await log("Humanizer", f"Selesai ({len(section_content)} chars)")
 
+        await log("Pipeline", f"Bagian {section_key} selesai")
         all_content += "\n\n" + section_content
         prev_titles += f"{heading}\n"
 

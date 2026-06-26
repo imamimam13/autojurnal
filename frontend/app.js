@@ -177,6 +177,26 @@ function showLoading() {
 
 function hideLoading() {
     document.getElementById("loading-section").style.display = "none";
+    const logEl = document.getElementById("log-display");
+    if (logEl) { logEl.style.display = "none"; logEl.innerHTML = ""; }
+}
+
+function clearLogs() {
+    const el = document.getElementById("log-display");
+    if (el) { el.innerHTML = ""; el.style.display = "none"; }
+}
+
+function addLogEntry(agent, message, detail) {
+    const el = document.getElementById("log-display");
+    if (!el) return;
+    el.style.display = "block";
+    const time = new Date().toLocaleTimeString();
+    const line = document.createElement("div");
+    line.className = "log-entry";
+    const detailText = detail ? ` — ${detail}` : "";
+    line.textContent = `[${time}] [${agent}] ${message}${detailText}`;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
 }
 
 async function searchPapers() {
@@ -538,12 +558,14 @@ async function generateJournal() {
         isTextbook ? "Generating textbook..." : "Generating journal...",
         `Using ${provider}${providerModel ? ` (${providerModel})` : ""}${isTextbook ? ` · ${numChapters} chapters` : ""}`
     );
+    clearLogs();
 
     const templateId = document.getElementById("template-select").value;
     localStorage.setItem("autojurnal-template-id", templateId);
 
     const hasData = document.getElementById("has-data").checked;
     const userData = document.getElementById("user-data").value.trim() || null;
+    const useLibrary = document.getElementById("use-library").checked;
     const body = {
         theme,
         papers: selectedPapers,
@@ -560,52 +582,115 @@ async function generateJournal() {
         user_data: userData,
         do_research: doResearch,
         research_job_id: researchJobId,
+        library: useLibrary,
     };
     if (isTextbook) body.num_chapters = numChapters;
 
     try {
-        const resp = await fetch(`${API_BASE}/api/generate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
-
-        if (!resp.ok) {
-            const errText = await resp.text();
-            throw new Error(`[${resp.status}] ${errText}`);
+        // Use SSE streaming for agent/textbook modes, fallback to regular POST for simple mode
+        if (multiAgent || isTextbook) {
+            await generateJournalStream(body);
+        } else {
+            await generateJournalSimple(body);
         }
-
-        const data = await resp.json();
-        currentJournal = data.journal;
-
-        hideLoading();
-        document.getElementById("result-section").style.display = "block";
-        document.getElementById("result-label").textContent =
-            mode === "textbook" ? "Textbook" : "Journal";
-        document.getElementById("journal-content").innerHTML =
-            renderMarkdown(currentJournal);
-        applyParagraphControls();
-
-        if (data.token_usage) {
-            const tu = data.token_usage;
-            const el = document.getElementById("token-usage");
-            if (el) {
-                const inTok = tu.input_tokens?.toLocaleString() || "?";
-                const outTok = tu.output_tokens?.toLocaleString() || "?";
-                const est = tu.estimated ? " (estimated)" : "";
-                el.textContent = `Tokens${est} — Input: ${inTok} · Output: ${outTok}`;
-                el.style.display = "block";
-            }
-        }
-
-        document.getElementById("journal-content").scrollIntoView({
-            behavior: "smooth",
-        });
-
     } catch (err) {
         updateLoading("Generation failed", err.message.substring(0, 300), true);
         setTimeout(hideLoading, 8000);
     }
+}
+
+async function generateJournalSimple(body) {
+    const resp = await fetch(`${API_BASE}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`[${resp.status}] ${errText}`);
+    }
+    const data = await resp.json();
+    displayResult(data, body.mode);
+}
+
+async function generateJournalStream(body) {
+    const resp = await fetch(`${API_BASE}/api/generate/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`[${resp.status}] ${errText}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const raw = line.slice(6).trim();
+            if (!raw) continue;
+
+            try {
+                const event = JSON.parse(raw);
+                if (event.type === "log") {
+                    addLogEntry(event.agent, event.message, event.detail);
+                } else if (event.type === "result") {
+                    displayResult({
+                        journal: event.journal,
+                        provider_used: event.provider_used,
+                        token_usage: event.token_usage,
+                    }, body.mode);
+                    return;
+                } else if (event.type === "error") {
+                    throw new Error(event.message || "Unknown generation error");
+                }
+                // heartbeat — ignore
+            } catch (e) {
+                if (e.message?.includes("generation") || e.message?.includes("error")) {
+                    throw e;
+                }
+            }
+        }
+    }
+}
+
+function displayResult(data, mode) {
+    currentJournal = data.journal;
+
+    hideLoading();
+    document.getElementById("result-section").style.display = "block";
+    document.getElementById("result-label").textContent =
+        mode === "textbook" ? "Textbook" : "Journal";
+    document.getElementById("journal-content").innerHTML =
+        renderMarkdown(currentJournal);
+    applyParagraphControls();
+
+    if (data.token_usage) {
+        const tu = data.token_usage;
+        const el = document.getElementById("token-usage");
+        if (el) {
+            const inTok = tu.input_tokens?.toLocaleString() || "?";
+            const outTok = tu.output_tokens?.toLocaleString() || "?";
+            const est = tu.estimated ? " (estimated)" : "";
+            el.textContent = `Tokens${est} — Input: ${inTok} · Output: ${outTok}`;
+            el.style.display = "block";
+        }
+    }
+
+    document.getElementById("journal-content").scrollIntoView({
+        behavior: "smooth",
+    });
 }
 
 function showToast(msg, type = "success") {

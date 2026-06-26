@@ -1,4 +1,5 @@
 import re
+import asyncio
 from typing import Optional
 from search.openalex import Paper
 from providers.base import LLMProvider
@@ -420,12 +421,24 @@ async def generate_textbook(
     template: Optional[dict] = None,
     has_data: bool = False,
     user_data: Optional[str] = None,
+    log_queue: Optional[asyncio.Queue] = None,
+    previous_works_ctx: str = "",
 ) -> tuple[str, dict]:
+
+    async def log(agent: str, msg: str, detail: str = ""):
+        line = f"[{agent}] {msg}"
+        print(line)
+        if log_queue:
+            await log_queue.put({
+                "type": "log", "agent": agent,
+                "message": msg, "detail": detail,
+            })
+
     tracker = TokenTracker()
     lang = "id" if language == "id" else "en"
     subsections = _template_subsections(template, lang)
     if template and template.get("chapter_subsections"):
-        print(f"[Textbook] Using template subsections: {subsections}")
+        await log("Textbook", f"Using template subsections: {subsections}")
 
     paper_list = "\n".join(
         f"[{i+1}] {p.authors[0] if p.authors else 'Unknown'} ({p.year}). {p.title}."
@@ -433,13 +446,13 @@ async def generate_textbook(
     )
 
     # ---- Step 0: Methodology Analyst (runs once) ----
+    await log("Methodology Analyst", "Menentukan metodologi penelitian...")
     methodology_sys = TEXTBOOK_PROMPTS["methodology_analyst"][lang]
     methodology_task = _methodology_prompt(lang, theme, paper_list, template)
     methodology_context = await tracker.run(provider, methodology_sys, methodology_task)
-    print(f"[Textbook] Methodology Analyst done: {len(methodology_context)} chars")
-    print(f"[Textbook] Methodology:\n{methodology_context}")
+    await log("Methodology Analyst", f"Selesai ({len(methodology_context)} chars)")
 
-    # Build template + methodology context
+    # Build template + methodology + previous-works context
     template_ctx = ""
     if template:
         from .agents import _format_template_constraints
@@ -450,14 +463,16 @@ async def generate_textbook(
             template_ctx = f"\n\n{header}\n{subs_list}"
         template_ctx += tc + "\n\n"
     template_ctx += f"METODOLOGI PENELITIAN:\n{methodology_context}\n\n" if lang == "id" else f"RESEARCH METHODOLOGY:\n{methodology_context}\n\n"
+    if previous_works_ctx:
+        template_ctx += previous_works_ctx + "\n\n"
 
     # ---- Step 1: Curriculum Designer ----
-    print(f"[Textbook] Designing curriculum for {num_chapters} chapters")
+    await log("Curriculum Designer", f"Mendesain kurikulum untuk {num_chapters} bab...")
     curriculum_sys = (template_ctx or "") + (CURRICULUM_SYSTEM_ID if language == "id" else CURRICULUM_SYSTEM_EN)
     curriculum_task = _curriculum_prompt(lang, theme, num_chapters)
     chapter_text = await tracker.run(provider, curriculum_sys, curriculum_task)
     chapters = _parse_chapters(chapter_text, num_chapters)
-    print(f"[Textbook] Generated {len(chapters)} chapters: {chapters}")
+    await log("Curriculum Designer", f"{len(chapters)} bab dibuat")
 
     all_chapter_titles = "\n".join(f"Chapter {i+1}: {t}" for i, t in enumerate(chapters))
     all_content = ""
@@ -465,7 +480,7 @@ async def generate_textbook(
 
     for i, title in enumerate(chapters):
         chapter_num = i + 1
-        print(f"[Textbook] Chapter {chapter_num}/{num_chapters}: {title}")
+        await log("Pipeline", f"Bab {chapter_num}/{num_chapters}: {title}")
 
         # RAG context for this chapter
         rag = ""
@@ -475,35 +490,41 @@ async def generate_textbook(
                 rag = store.format_context(rag_results, papers)
 
         # 2. Lead Researcher (chapter plan)
+        await log("Lead Researcher", "Membuat rencana bab...")
         researcher_sys = template_ctx + TEXTBOOK_PROMPTS["lead_researcher"][lang]
         task = _chapter_researcher_prompt(lang, theme, chapter_num, title, prev_titles)
         plan = await tracker.run(provider, researcher_sys, task)
-        print(f"[Textbook] Lead Researcher done: {len(plan)} chars")
+        await log("Lead Researcher", f"Rencana selesai ({len(plan)} chars)")
 
         # 3. Source Reviewer
+        await log("Source Reviewer", "Mengekstrak materi dari sumber...")
         reviewer_sys = template_ctx + TEXTBOOK_PROMPTS["source_reviewer"][lang]
         task = _chapter_reviewer_prompt(lang, theme, chapter_num, title, plan, rag)
         findings = await tracker.run(provider, reviewer_sys, task)
-        print(f"[Textbook] Source Reviewer done: {len(findings)} chars")
+        await log("Source Reviewer", f"Ekstraksi selesai ({len(findings)} chars)")
 
         # 4. Lead Writer
+        await log("Lead Writer", "Menulis bab...")
         writer_sys = template_ctx + TEXTBOOK_PROMPTS["lead_writer"][lang]
         task = _chapter_writer_prompt(lang, theme, chapter_num, title, plan, findings, prev_titles, paper_list, all_chapter_titles, subsections, has_data, user_data)
         chapter_content = await tracker.run(provider, writer_sys, task)
-        print(f"[Textbook] Lead Writer done: {len(chapter_content)} chars")
+        await log("Lead Writer", f"Bab selesai ({len(chapter_content)} chars)")
 
         # 4b. Lead Storyteller (enrich descriptiveness)
+        await log("Lead Storyteller", "Memperkaya dengan ilustrasi dan narasi...")
         story_sys = template_ctx + TEXTBOOK_PROMPTS["lead_story"][lang]
         story_task = _chapter_lead_story_prompt(lang, chapter_num, title, chapter_content, methodology_context)
         chapter_content = await tracker.run(provider, story_sys, story_task)
-        print(f"[Textbook] Lead Storyteller done: {len(chapter_content)} chars")
+        await log("Lead Storyteller", "Pengayaan selesai")
 
         # 5. Humanizer
+        await log("Humanizer", "Menghumanisasi bab...")
         humanizer_sys = template_ctx + TEXTBOOK_PROMPTS["humanizer"][lang]
         task = _chapter_humanizer_prompt(lang, chapter_num, title, chapter_content)
         chapter_content = await tracker.run(provider, humanizer_sys, task)
-        print(f"[Textbook] Humanizer done: {len(chapter_content)} chars")
+        await log("Humanizer", f"Selesai ({len(chapter_content)} chars)")
 
+        await log("Pipeline", f"Bab {chapter_num} selesai")
         all_content += "\n\n" + chapter_content
         prev_titles += f"Bab {chapter_num}: {title}\n" if language == "id" else f"Chapter {chapter_num}: {title}\n"
 

@@ -1,13 +1,17 @@
 import hashlib
 import sys
+import asyncio
+import json
+import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, AsyncGenerator
 import os
 import re
 import tempfile
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -24,11 +28,14 @@ from templates import load_template, list_templates, save_template, delete_templ
 from restructure.parser import split_sections
 from docx import Document as DocxDocument
 from restructure import parse_document, restructure_document as restructure_doc, resolve_link, render_diagrams
+from store.works import WorksStore, WorkRecord, format_previous_works_context
 from diagrams import extract_and_render_diagrams
 from research import research_router
 
 app = FastAPI(title=settings.app_name, version="1.0.0")
 app.include_router(research_router)
+
+works_store = WorksStore()
 
 
 def format_reference(p: Paper) -> str:
@@ -87,6 +94,58 @@ def _strip_inline_references(text: str) -> str:
     body = re.sub(r"\n{3,}", "\n\n", body).strip()
 
     return (body + "\n\n" + refs) if refs else body
+
+
+async def _setup_rag(papers: list[Paper], paper_hash: str):
+    if store.paper_hash == paper_hash:
+        print(f"[RAG] Store already has data for this paper set ({len(store)} chunks) — skipping scrape")
+        return
+
+    if store.restore_if_exists(paper_hash):
+        print(f"[RAG] Restored from disk — skipping scrape")
+        return
+
+    store.clear()
+    MAX_SCRAPE = 20
+    sorted_papers = sorted(papers, key=lambda p: p.relevance_score or 0, reverse=True)
+    scrape_targets = sorted_papers[:MAX_SCRAPE]
+    abstract_targets = sorted_papers[MAX_SCRAPE:]
+    print(f"[RAG] Scraping top {len(scrape_targets)} PDFs + {len(abstract_targets)} abstracts")
+    try:
+        chunks = await scrape_all(scrape_targets, max_concurrent=10)
+        scraped_indices = set()
+        for local_idx, chunk_list in chunks.items():
+            p = scrape_targets[local_idx]
+            original_idx = papers.index(p)
+            scraped_indices.add(original_idx)
+            store.add_chunks(original_idx, chunk_list, {
+                "title": p.title,
+                "authors": p.authors,
+                "year": p.year,
+                "source": p.source,
+            })
+        for p in scrape_targets:
+            original_idx = papers.index(p)
+            if original_idx not in scraped_indices and p.abstract:
+                store.add_chunks(original_idx, [p.abstract], {
+                    "title": p.title,
+                    "authors": p.authors,
+                    "year": p.year,
+                    "source": p.source,
+                })
+        for p in abstract_targets:
+            if p.abstract:
+                original_idx = papers.index(p)
+                store.add_chunks(original_idx, [p.abstract], {
+                    "title": p.title,
+                    "authors": p.authors,
+                    "year": p.year,
+                    "source": p.source,
+                })
+        print(f"[RAG] Indexed {len(store)} chunks ({len(chunks)} PDFs + abstracts)")
+        store.set_paper_hash(paper_hash)
+    except Exception as e:
+        print(f"[RAG] Scrape error (continuing without): {e}")
 
 
 def replace_references(journal: str, papers: list[Paper], language: str) -> str:
@@ -155,6 +214,7 @@ class GenerateRequest(BaseModel):
     user_data: Optional[str] = Field(default=None, description="User-provided research data (CSV/JSON/table)")
     do_research: bool = False
     research_job_id: Optional[str] = None
+    library: bool = Field(default=False, description="Check previous works on similar themes to avoid duplication")
 
 
 class RestructureParseRequest(BaseModel):
@@ -229,6 +289,15 @@ class GenerateResponse(BaseModel):
     journal: str
     provider_used: str
     token_usage: Optional[dict] = None
+
+
+class WorksListResponse(BaseModel):
+    works: list[dict]
+    total: int
+
+
+class WorksDeleteResponse(BaseModel):
+    status: str
 
 
 class ProviderInfo(BaseModel):
@@ -378,58 +447,24 @@ async def generate_journal(req: GenerateRequest):
                     cited_by_count=0,
                 ))
 
-    # RAG: scrape PDFs and index chunks
+    # RAG: scrape PDFs and index chunks (persistent — data survives restarts)
     paper_ids = "-".join(sorted(p.doi or p.openalex_url or p.title for p in papers))
     paper_hash = hashlib.md5(paper_ids.encode()).hexdigest()
-
-    if store.paper_hash == paper_hash:
-        print(f"[RAG] Store already has data for this paper set ({len(store)} chunks) — skipping scrape")
-    else:
-        store.clear()
-        MAX_SCRAPE = 20
-        sorted_papers = sorted(papers, key=lambda p: p.relevance_score or 0, reverse=True)
-        scrape_targets = sorted_papers[:MAX_SCRAPE]
-        abstract_targets = sorted_papers[MAX_SCRAPE:]
-        print(f"[RAG] Scraping top {len(scrape_targets)} PDFs + {len(abstract_targets)} abstracts")
-        try:
-            chunks = await scrape_all(scrape_targets, max_concurrent=10)
-            scraped_indices = set()
-            for local_idx, chunk_list in chunks.items():
-                p = scrape_targets[local_idx]
-                original_idx = papers.index(p)
-                scraped_indices.add(original_idx)
-                store.add_chunks(original_idx, chunk_list, {
-                    "title": p.title,
-                    "authors": p.authors,
-                    "year": p.year,
-                    "source": p.source,
-                })
-            for p in scrape_targets:
-                original_idx = papers.index(p)
-                if original_idx not in scraped_indices and p.abstract:
-                    store.add_chunks(original_idx, [p.abstract], {
-                        "title": p.title,
-                        "authors": p.authors,
-                        "year": p.year,
-                        "source": p.source,
-                    })
-            for p in abstract_targets:
-                if p.abstract:
-                    original_idx = papers.index(p)
-                    store.add_chunks(original_idx, [p.abstract], {
-                        "title": p.title,
-                        "authors": p.authors,
-                        "year": p.year,
-                        "source": p.source,
-                    })
-            print(f"[RAG] Indexed {len(store)} chunks ({len(chunks)} PDFs + abstracts)")
-            store.paper_hash = paper_hash
-        except Exception as e:
-            print(f"[RAG] Scrape error (continuing without): {e}")
+    await _setup_rag(papers, paper_hash)
 
     template = None
     if req.template_id:
         template = load_template(req.template_id)
+
+    # Librarian: search previous works for context
+    prev_works_ctx = ""
+    if req.library:
+        similar = works_store.search_similar(req.theme, top_k=3, min_score=0.05)
+        if similar:
+            prev_works_ctx = format_previous_works_context(similar)
+            print(f"[Librarian] Found {len(similar)} similar past works")
+            if req.multi_agent == False and req.mode != "textbook":
+                system_prompt = prev_works_ctx + "\n\n" + system_prompt
 
     try:
         if req.mode == "textbook":
@@ -438,6 +473,7 @@ async def generate_journal(req: GenerateRequest):
                 provider=provider, papers=papers, theme=req.theme,
                 language=req.language, num_chapters=req.num_chapters,
                 template=template, has_data=req.has_data, user_data=req.user_data,
+                previous_works_ctx=prev_works_ctx,
             )
             token_usage["estimated"] = True
         elif req.multi_agent:
@@ -446,6 +482,7 @@ async def generate_journal(req: GenerateRequest):
                 provider=provider, papers=papers, theme=req.theme,
                 language=req.language, target_length=req.target_length,
                 template=template, has_data=req.has_data, user_data=req.user_data,
+                previous_works_ctx=prev_works_ctx,
             )
             token_usage["estimated"] = True
         else:
@@ -494,11 +531,235 @@ async def generate_journal(req: GenerateRequest):
         journal = await render_diagrams(journal)
         journal = replace_references(journal, papers, req.language)
         journal = _strip_inline_references(journal)
-    finally:
-        store.clear()
-        print("[RAG] Store cleared")
+
+        # Save to library if enabled
+        if req.library:
+            paper_titles = [getattr(p, "title", "") or "" for p in papers]
+            work = WorkRecord(
+                work_id=str(uuid.uuid4()),
+                theme=req.theme,
+                content=journal,
+                language=req.language,
+                mode=req.mode or "journal",
+                provider=provider.display_name,
+                paper_titles=paper_titles,
+            )
+            works_store.save_work(work)
+            print(f"[Librarian] Saved work '{work.work_id[:8]}'")
+    except Exception as e:
+        print(f"[Librarian] Save error: {e}")
 
     return GenerateResponse(journal=journal, provider_used=provider.display_name, token_usage=token_usage)
+
+
+@app.post("/api/generate/stream")
+
+
+@app.post("/api/generate/stream")
+async def generate_journal_stream(req: GenerateRequest):
+    provider_kwargs = {}
+    if req.provider_model:
+        provider_kwargs["model"] = req.provider_model
+    if req.api_key:
+        provider_kwargs["api_key"] = req.api_key
+    if req.provider_base_url:
+        provider_kwargs["base_url"] = req.provider_base_url
+
+    provider = get_provider(req.provider, **provider_kwargs)
+    if not provider:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{req.provider}' not available. Choose from: {[p['id'] for p in list_providers()]}",
+        )
+
+    papers = [
+        Paper(
+            title=p.get("title", "Untitled"),
+            abstract=p.get("abstract"),
+            authors=p.get("authors", []),
+            year=p.get("year"),
+            doi=p.get("doi"),
+            openalex_url=p.get("openalex_url"),
+            url=p.get("url"),
+            pdf_url=p.get("pdf_url"),
+            source=p.get("source"),
+            cited_by_count=p.get("cited_by_count", 0),
+            relevance_score=p.get("relevance_score"),
+            concepts=p.get("concepts", []),
+        )
+        for p in req.papers
+    ]
+
+    if req.research_job_id:
+        from .research import get_job as get_research_job
+        research_job = get_research_job(req.research_job_id)
+        if research_job and research_job.sources:
+            for src in research_job.sources:
+                if not src.text:
+                    continue
+                papers.append(Paper(
+                    title=src.title,
+                    abstract=src.text[:1000],
+                    authors=[],
+                    year=None,
+                    doi=None,
+                    openalex_url=None,
+                    url=src.url,
+                    pdf_url=None,
+                    source=f"research_{src.source}",
+                    cited_by_count=0,
+                ))
+
+    # RAG: scrape PDFs and index chunks (persistent)
+    paper_ids = "-".join(sorted(p.doi or p.openalex_url or p.title for p in papers))
+    paper_hash = hashlib.md5(paper_ids.encode()).hexdigest()
+    await _setup_rag(papers, paper_hash)
+
+    template = None
+    if req.template_id:
+        template = load_template(req.template_id)
+
+    log_queue: asyncio.Queue = asyncio.Queue()
+
+    # Librarian: search previous works for context
+    prev_works_ctx = ""
+    if req.library:
+        similar = works_store.search_similar(req.theme, top_k=3, min_score=0.05)
+        if similar:
+            prev_works_ctx = format_previous_works_context(similar)
+            print(f"[Librarian] Found {len(similar)} similar past works")
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        generation_task = asyncio.create_task(_run_generation(
+            provider=provider, papers=papers, theme=req.theme,
+            language=req.language, target_length=req.target_length,
+            num_chapters=req.num_chapters, mode=req.mode,
+            multi_agent=req.multi_agent, template=template,
+            has_data=req.has_data, user_data=req.user_data,
+            log_queue=log_queue,
+            previous_works_ctx=prev_works_ctx,
+            do_library=req.library,
+        ))
+
+        while True:
+            try:
+                entry = await asyncio.wait_for(log_queue.get(), timeout=1.0)
+                yield f"data: {json.dumps(entry)}\n\n"
+                if entry.get("type") == "result":
+                    break
+            except asyncio.TimeoutError:
+                if generation_task.done():
+                    break
+                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+
+        if generation_task.done() and not generation_task.cancelled():
+            exc = generation_task.exception()
+            if exc:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+async def _run_generation(
+    provider, papers, theme, language, target_length, num_chapters,
+    mode, multi_agent, template, has_data, user_data, log_queue,
+    previous_works_ctx="", do_library=False,
+):
+    try:
+        prev_ctx = previous_works_ctx
+
+        if mode == "textbook":
+            journal, token_usage = await generate_textbook(
+                provider=provider, papers=papers, theme=theme,
+                language=language, num_chapters=num_chapters,
+                template=template, has_data=has_data, user_data=user_data,
+                log_queue=log_queue, previous_works_ctx=prev_ctx,
+            )
+            token_usage["estimated"] = True
+        elif multi_agent:
+            journal, token_usage = await generate_multi_agent(
+                provider=provider, papers=papers, theme=theme,
+                language=language, target_length=target_length,
+                template=template, has_data=has_data, user_data=user_data,
+                log_queue=log_queue, previous_works_ctx=prev_ctx,
+            )
+            token_usage["estimated"] = True
+        else:
+            system_prompt = build_system_prompt(language)
+            if prev_ctx:
+                system_prompt = prev_ctx + "\n\n" + system_prompt
+            num_parts = count_parts(target_length)
+            journal_parts = []
+            previous_content = None
+            for part in range(1, num_parts + 1):
+                section_queries = {
+                    1: f"{theme} introduction background literature review",
+                    2: f"{theme} method findings results discussion",
+                    3: f"{theme} conclusion implications",
+                }
+                query = section_queries.get(part, theme)
+                rag_results = store.search(query, top_k=5, min_score=0.05)
+                rag_context = store.format_context(rag_results, papers) if rag_results else None
+
+                prompt = build_part_prompt(
+                    papers, language, theme, target_length,
+                    part=part, num_parts=num_parts, previous_content=previous_content,
+                    rag_context=rag_context, has_data=has_data, user_data=user_data,
+                )
+                part_text = await provider.generate(prompt, system_prompt=system_prompt)
+
+                if part != num_parts:
+                    for marker in ["\n## References", "\nReferences", "\n## Daftar Pustaka", "\nDaftar Pustaka"]:
+                        idx = part_text.find(marker)
+                        if idx != -1:
+                            part_text = part_text[:idx]
+                if part > 1:
+                    new_sections = (
+                        ["## Metode Penelitian", "## Temuan dan Pembahasan", "## Research Method", "## Findings and Discussion"]
+                        if part == 2 else ["## Penutup", "## Conclusion"]
+                    )
+                    for s in new_sections:
+                        idx = part_text.find(s)
+                        if idx != -1:
+                            part_text = part_text[idx:]
+                            break
+                journal_parts.append(part_text)
+                previous_content = (previous_content or "") + "\n\n" + part_text
+            journal = "\n\n".join(journal_parts)
+            token_usage = None
+
+        journal = extract_and_render_diagrams(journal)
+        journal = await render_diagrams(journal)
+        journal = replace_references(journal, papers, language)
+        journal = _strip_inline_references(journal)
+
+        # Save to library if enabled
+        if do_library:
+            paper_titles = [getattr(p, "title", "") or p.get("title", "") for p in papers]
+            work = WorkRecord(
+                work_id=str(uuid.uuid4()),
+                theme=theme,
+                content=journal,
+                language=language,
+                mode=mode or "journal",
+                provider=provider.display_name,
+                paper_titles=paper_titles,
+            )
+            works_store.save_work(work)
+            await log_queue.put({
+                "type": "log", "agent": "Librarian",
+                "message": f"Karya disimpan ke perpustakaan ({work.work_id[:8]})",
+                "detail": f"Tema: {theme}",
+            })
+
+        await log_queue.put({
+            "type": "result",
+            "journal": journal,
+            "provider_used": provider.display_name,
+            "token_usage": token_usage,
+        })
+    except Exception as e:
+        await log_queue.put({"type": "error", "message": str(e)})
 
 
 @app.post("/api/restructure/parse", response_model=RestructureParseResponse)
@@ -980,6 +1241,22 @@ Guidelines text:
         }
 
     raise HTTPException(status_code=422, detail="No headings detected and no LLM available to parse guidelines")
+
+
+@app.get("/api/works", response_model=WorksListResponse)
+async def list_works(limit: int = 50, offset: int = 0):
+    works = works_store.list_works(limit=limit, offset=offset)
+    return WorksListResponse(works=works, total=len(works))
+
+
+@app.delete("/api/works/{work_id}", response_model=WorksDeleteResponse)
+async def delete_work(work_id: str):
+    if not work_id.strip():
+        raise HTTPException(status_code=400, detail="work_id is required")
+    ok = works_store.delete_work(work_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Work not found")
+    return WorksDeleteResponse(status="deleted")
 
 
 frontend_dir = Path(__file__).resolve().parent.parent / "frontend"

@@ -1095,7 +1095,8 @@ async def generate_multi_agent(
 
         # 8. Humanizer
         await log("Humanizer", "Menghumanisasi naskah...")
-        humanizer_sys = template_ctx + SYSTEM_PROMPTS["humanizer"][lang]
+        # Clean system prompt — no template_ctx to avoid prompt leakage
+        humanizer_sys = SYSTEM_PROMPTS["humanizer"][lang]
         task = _humanizer_prompt(lang, theme, heading, section_content)
         section_content = await tracker.run(provider, humanizer_sys, task)
         await log("Humanizer", f"Selesai ({len(section_content)} chars)")

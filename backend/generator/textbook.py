@@ -519,7 +519,7 @@ async def generate_textbook(
 
         # 5. Humanizer
         await log("Humanizer", "Menghumanisasi bab...")
-        humanizer_sys = template_ctx + TEXTBOOK_PROMPTS["humanizer"][lang]
+        humanizer_sys = TEXTBOOK_PROMPTS["humanizer"][lang]
         task = _chapter_humanizer_prompt(lang, chapter_num, title, chapter_content)
         chapter_content = await tracker.run(provider, humanizer_sys, task)
         await log("Humanizer", f"Selesai ({len(chapter_content)} chars)")

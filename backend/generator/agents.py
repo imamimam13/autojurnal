@@ -838,12 +838,10 @@ Examples:
 Output ONLY the 4 lines above, no other format."""
 
 
-def _lead_story_prompt(language: str, section_key: str, theme: str, section_heading: str, section_content: str, methodology_context: str) -> str:
+def _lead_story_prompt(language: str, theme: str, section_heading: str, section_content: str) -> str:
     if language == "id":
         return f"""Tema Penelitian: "{theme}"
 Bagian: {section_heading}
-
-{methodology_context}
 
 NASKAH YANG AKAN DIPERKAYA:
 {section_content}
@@ -865,8 +863,6 @@ Petunjuk:
 8. **Output ONLY** naskah yang sudah diperkaya, tanpa komentar tambahan."""
     return f"""Research Theme: "{theme}"
 Section: {section_heading}
-
-{methodology_context}
 
 TEXT TO ENRICH:
 {section_content}
@@ -1059,7 +1055,7 @@ async def generate_multi_agent(
         # 3b. Lead Storyteller (enrich descriptiveness)
         await log("Lead Storyteller", "Memperkaya dengan elemen naratif...")
         story_sys = template_ctx + SYSTEM_PROMPTS["lead_story"][lang]
-        story_task = _lead_story_prompt(lang, section_key, theme, heading, section_content, methodology_context)
+        story_task = _lead_story_prompt(lang, theme, heading, section_content)
         section_content_storied = await tracker.run(provider, story_sys, story_task)
         await log("Lead Storyteller", f"Pengayaan selesai ({len(section_content_storied)} chars)")
 
@@ -1084,13 +1080,15 @@ async def generate_multi_agent(
 
         # 6b. Lead Storyteller (revision enrich)
         await log("Lead Storyteller", "Memperkaya revisi...")
-        story_task = _lead_story_prompt(lang, section_key, theme, heading, section_content, methodology_context)
+        story_task = _lead_story_prompt(lang, theme, heading, section_content)
         section_content = await tracker.run(provider, story_sys, story_task)
         await log("Lead Storyteller", "Pengayaan revisi selesai")
 
         # 7. Lead Layouter (insert diagrams, charts, tables)
         await log("Lead Layouter", "Menambahkan elemen visual...")
-        layouter_sys = template_ctx + SYSTEM_PROMPTS["lead_layouter"][lang]
+        # Only use the role system prompt — no template_ctx to avoid confusing the model
+        # into rewriting the full paper structure instead of just adding visuals
+        layouter_sys = SYSTEM_PROMPTS["lead_layouter"][lang]
         layout_task = _lead_layout_prompt(lang, section_key, theme, heading, section_content, has_data, user_data)
         section_content = await tracker.run(provider, layouter_sys, layout_task)
         await log("Lead Layouter", f"Visual selesai ({len(section_content)} chars)")

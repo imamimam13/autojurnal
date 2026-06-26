@@ -747,8 +747,8 @@ function _copyFallback(text) {
     document.body.appendChild(ta);
     ta.select();
     try {
-        document.execCommand("copy");
-        showToast("Copied!");
+        const ok = document.execCommand("copy");
+        showToast(ok ? "Copied!" : "Copy failed — select manually", ok ? "success" : "danger");
     } catch {
         showToast("Copy failed — select manually", "danger");
     }
@@ -1488,9 +1488,6 @@ function copyTranslated() {
     const el = document.getElementById("translate-output");
     const rawMarkdown = el.dataset.raw || el.textContent || "";
     const rawHtml = renderMarkdown(rawMarkdown);
-    const cleanHtml = `<html><body>${_cleanHtmlClipboard(rawHtml)}</body></html>`;
-    const plainText = rawMarkdown.trim();
-
     _clipboardWrite(rawHtml, rawMarkdown.trim());
 }
 

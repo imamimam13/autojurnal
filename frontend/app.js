@@ -2,11 +2,22 @@ const API_BASE = "http://localhost:8000";
 
 let allPapers = [];
 let selectedIndices = new Set();
+let collectedPapers = [];
 let currentJournal = "";
+
+let templates = [];
+let parsedTemplate = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
     await loadProviders();
     restoreSettings();
+    restoreCollection();
+    await loadTemplateList();
+
+    document.getElementById("mode").addEventListener("change", () => {
+        toggleMode();
+        saveSettings();
+    });
 
     document.getElementById("provider").addEventListener("change", () => {
         saveSettings();
@@ -19,6 +30,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         el.addEventListener("change", saveSettings);
         el.addEventListener("input", saveSettings);
     });
+
+    document.getElementById("paper-title").addEventListener("input", updateGenerateBtn);
+    document.getElementById("template-select").addEventListener("change", saveSettings);
 
     const apiKeyEl = document.getElementById("llm-api-key");
     const providerEl = document.getElementById("provider");
@@ -33,16 +47,71 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 let _apiKeyTimeout = null;
 
+function toggleDataInput() {
+    const checked = document.getElementById("has-data").checked;
+    document.getElementById("data-input-section").style.display = checked ? "" : "none";
+    if (checked) document.getElementById("data-input-section").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+    document.getElementById("data-file-input").addEventListener("change", function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const name = file.name.toLowerCase();
+        if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+            const reader = new FileReader();
+            reader.onload = function (ev) {
+                try {
+                    const data = new Uint8Array(ev.target.result);
+                    const workbook = XLSX.read(data, { type: "array" });
+                    let combined = "";
+                    workbook.SheetNames.forEach((sname, i) => {
+                        const sheet = workbook.Sheets[sname];
+                        const csv = XLSX.utils.sheet_to_csv(sheet);
+                        if (workbook.SheetNames.length > 1) {
+                            combined += (i > 0 ? "\n\n" : "") + "=== " + sname + " ===\n" + csv;
+                        } else {
+                            combined = csv;
+                        }
+                    });
+                    document.getElementById("user-data").value = combined;
+                } catch (err) {
+                    alert("Gagal membaca Excel: " + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        } else {
+            const reader = new FileReader();
+            reader.onload = function (ev) {
+                document.getElementById("user-data").value = ev.target.result;
+            };
+            reader.readAsText(file);
+        }
+    });
+});
+
+function toggleMode() {
+    const mode = document.getElementById("mode").value;
+    const isTextbook = mode === "textbook";
+    document.getElementById("target-length-group").style.display = isTextbook ? "none" : "";
+    document.getElementById("chapter-count-group").style.display = isTextbook ? "" : "none";
+    document.getElementById("multi-agent").closest(".col-md-2").style.display = isTextbook ? "none" : "";
+    updateGenerateBtn();
+}
+
 function saveSettings() {
     const keys = [
         "openalex-api-key", "llm-api-key", "provider-model", "provider-base-url",
-        "theme", "year-range", "max-papers", "language", "provider", "multi-agent",
+        "theme", "paper-title", "year-range", "max-papers", "language", "provider",
+        "multi-agent", "has-data", "user-data", "mode", "num-chapters", "template-select",
     ];
     const data = {};
     keys.forEach((id) => {
         const el = document.getElementById(id);
-        if (el) data[id] = el.value;
+        if (el) data[id] = el.value !== undefined ? el.value : el.checked;
     });
+    // special handling for checkbox
+    data["multi-agent"] = document.getElementById("multi-agent").checked;
     try {
         localStorage.setItem("autojurnal-settings", JSON.stringify(data));
     } catch {}
@@ -68,8 +137,16 @@ function restoreSettings() {
         const data = JSON.parse(raw);
         Object.entries(data).forEach(([id, val]) => {
             const el = document.getElementById(id);
-            if (el && val) el.value = val;
+            if (!el) return;
+            if (el.type === "checkbox") {
+                el.checked = val === true || val === "true";
+            } else {
+                el.value = val;
+            }
         });
+        // template-select value is restored by populateTemplateSelect after templates load
+        toggleMode();
+        toggleDataInput();
     } catch {}
 }
 
@@ -110,7 +187,6 @@ async function searchPapers() {
     }
 
     document.getElementById("result-section").style.display = "none";
-    document.getElementById("generate-btn").disabled = true;
     showLoading();
     updateLoading("Searching papers on OpenAlex...", "Finding relevant academic papers");
 
@@ -164,8 +240,7 @@ async function searchPapers() {
 
         displayPapers(allPapers);
         document.getElementById("papers-section").style.display = "block";
-        document.getElementById("generate-btn").disabled = false;
-        document.getElementById("generate-btn").scrollIntoView({ behavior: "smooth" });
+        document.getElementById("papers-section").scrollIntoView({ behavior: "smooth" });
 
     } catch (err) {
         showLoading();
@@ -228,11 +303,15 @@ function toggleSelectPaper(index) {
 
 function updateGenerateBtn() {
     const btn = document.getElementById("generate-btn");
-    const count = selectedIndices.size;
-    btn.disabled = count === 0;
-    btn.innerHTML = `<i class="bi bi-journal-text me-2"></i>Generate Journal (${count} papers)`;
+    const count = collectedPapers.length;
+    const hasTitle = document.getElementById("paper-title").value.trim().length > 0;
+    btn.disabled = count === 0 || !hasTitle;
+    const isTextbook = document.getElementById("mode").value === "textbook";
+    const icon = isTextbook ? "book" : "journal-text";
+    const label = isTextbook ? "Generate Textbook" : "Generate Journal";
+    btn.innerHTML = `<i class="bi bi-${icon} me-2"></i>${label} (${count} papers)`;
     const selCount = document.getElementById("selected-count");
-    if (selCount) selCount.textContent = count;
+    if (selCount) selCount.textContent = selectedIndices.size;
 }
 
 function togglePaper(index) {
@@ -241,9 +320,11 @@ function togglePaper(index) {
 }
 
 function toggleAllPapers() {
-    const allChecked = document.querySelectorAll(".paper-item .form-check-input:checked").length === allPapers.length;
-    document.querySelectorAll(".paper-item").forEach((el, i) => {
+    const papers = document.querySelectorAll("#papers-list .paper-item");
+    const allChecked = papers.length > 0 && papers.length === document.querySelectorAll("#papers-list .form-check-input:checked").length;
+    papers.forEach((el, i) => {
         const chk = el.querySelector(".form-check-input");
+        if (!chk) return;
         if (allChecked) {
             chk.checked = false;
             selectedIndices.delete(i);
@@ -257,17 +338,138 @@ function toggleAllPapers() {
     updateGenerateBtn();
 }
 
+function addSelectedToCollection() {
+    console.log("addSelectedToCollection called");
+    console.log("allPapers:", allPapers.length, "selectedIndices:", selectedIndices.size);
+    try {
+        const selected = allPapers.filter((_, i) => selectedIndices.has(i));
+        console.log("selected papers:", selected.length);
+        if (selected.length === 0) {
+            alert("No papers selected. Please check some papers first.");
+            return;
+        }
+        const existingKeys = new Set(
+            collectedPapers.map(p => p.doi || p.openalex_url || p.title)
+        );
+        const newPapers = selected.filter(
+            p => !existingKeys.has(p.doi || p.openalex_url || p.title)
+        );
+        console.log("new papers to add:", newPapers.length);
+        if (newPapers.length === 0) {
+            alert("All selected papers are already in collection.");
+            return;
+        }
+        collectedPapers.push(...newPapers);
+        renderCollectedPapers();
+        saveCollection();
+        alert(`${newPapers.length} paper(s) added to collection!`);
+
+        selectedIndices.clear();
+        document.querySelectorAll("#papers-list .paper-item").forEach(el => {
+            el.classList.remove("selected");
+            const chk = el.querySelector(".form-check-input");
+            if (chk) chk.checked = false;
+        });
+        updateGenerateBtn();
+    } catch (e) {
+        console.error("addSelectedToCollection error:", e);
+        alert("Error: " + e.message);
+    }
+}
+
+function removeFromCollection(index) {
+    collectedPapers.splice(index, 1);
+    renderCollectedPapers();
+    saveCollection();
+    updateGenerateBtn();
+}
+
+function clearCollection() {
+    if (collectedPapers.length === 0) return;
+    collectedPapers = [];
+    renderCollectedPapers();
+    saveCollection();
+    updateGenerateBtn();
+    showToast("Collection cleared");
+}
+
+function renderCollectedPapers() {
+    console.log("renderCollectedPapers, count:", collectedPapers.length);
+    const container = document.getElementById("collection-list");
+    const count = document.getElementById("collection-count");
+    if (!container || !count) {
+        console.error("collection-list or collection-count element not found! Page might be cached.");
+        return;
+    }
+    count.textContent = collectedPapers.length;
+
+    if (collectedPapers.length === 0) {
+        const section = document.getElementById("collection-section");
+        if (section) section.style.display = "none";
+        container.innerHTML = "";
+        return;
+    }
+
+    const section = document.getElementById("collection-section");
+    if (!section) {
+        console.error("collection-section element not found! Page might be cached.");
+        return;
+    }
+    section.style.display = "block";
+
+    container.innerHTML = collectedPapers
+        .map((p, i) => `
+            <div class="paper-item">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1 me-3">
+                        <div class="paper-title">${escapeHtml(p.title)}</div>
+                        <div class="paper-meta">
+                            ${(p.authors || []).slice(0, 3).join(", ")}${p.authors.length > 3 ? " et al." : ""}
+                            ${p.year ? ` (${p.year})` : ""}
+                            ${p.source ? ` - ${escapeHtml(p.source)}` : ""}
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger" onclick="removeFromCollection(${i})" title="Remove">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            </div>
+        `)
+        .join("");
+
+    updateGenerateBtn();
+}
+
+function saveCollection() {
+    try {
+        localStorage.setItem("autojurnal-collection", JSON.stringify(collectedPapers));
+    } catch {}
+}
+
+function restoreCollection() {
+    try {
+        const raw = localStorage.getItem("autojurnal-collection");
+        if (raw) {
+            collectedPapers = JSON.parse(raw);
+            renderCollectedPapers();
+        }
+    } catch {}
+}
+
 async function generateJournal() {
-    const theme = document.getElementById("theme").value.trim();
-    const selectedPapers = allPapers.filter((_, i) => selectedIndices.has(i));
+    const theme = document.getElementById("paper-title").value.trim();
+    const selectedPapers = collectedPapers;
     if (!theme || selectedPapers.length === 0) {
-        alert("Select at least one paper first.");
+        alert("Enter a paper title and collect at least one paper first.");
         return;
     }
 
     const language = document.getElementById("language").value;
-    const targetLength = document.getElementById("target-length").value;
-    const multiAgent = document.getElementById("multi-agent").checked;
+    const mode = document.getElementById("mode").value;
+    const isTextbook = mode === "textbook";
+    const targetLength = isTextbook ? "long" : document.getElementById("target-length").value;
+    const multiAgent = isTextbook ? true : document.getElementById("multi-agent").checked;
+    const numChapters = isTextbook ? parseInt(document.getElementById("num-chapters").value) || 14 : 0;
     const provider = document.getElementById("provider").value;
     const providerModel =
         document.getElementById("provider-model").value.trim() || null;
@@ -276,28 +478,96 @@ async function generateJournal() {
     const apiKey =
         document.getElementById("llm-api-key").value.trim() || null;
 
+    const doResearch = document.getElementById("do-research").checked;
+
+    let researchJobId = null;
+
+    // Phase 1: Research (if checkbox is ON)
+    if (doResearch) {
+        showLoading();
+        updateLoading("Starting research...", "Searching Google, Scholar, and PubMed for latest sources");
+
+        try {
+            const startResp = await fetch(`${API_BASE}/api/research/start`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ theme, title: theme, language }),
+            });
+            if (!startResp.ok) throw new Error(await startResp.text());
+            const { job_id } = await startResp.json();
+            if (!job_id) throw new Error("No job_id returned");
+
+            // Poll for completion
+            let done = false;
+            let pollCount = 0;
+            while (!done && pollCount < 60) {
+                await new Promise(r => setTimeout(r, 3000));
+                pollCount++;
+
+                const statusResp = await fetch(`${API_BASE}/api/research/status/${job_id}`);
+                if (!statusResp.ok) throw new Error(await statusResp.text());
+                const status = await statusResp.json();
+
+                updateLoading(
+                    `Researching... (${status.progress}%)`,
+                    status.progress_detail || "Processing..."
+                );
+
+                if (status.status === "done") {
+                    researchJobId = job_id;
+                    done = true;
+                    showToast(`Research complete: ${status.scraped_count} articles scraped from ${status.sources_count} sources`, "success");
+                } else if (status.status === "error") {
+                    throw new Error(status.error || "Research failed");
+                }
+            }
+
+            if (!done) throw new Error("Research timed out after 3 minutes");
+
+        } catch (err) {
+            updateLoading("Research failed", err.message.substring(0, 300), true);
+            setTimeout(hideLoading, 8000);
+            return;
+        }
+    }
+
+    // Phase 2: Generate
     document.getElementById("result-section").style.display = "none";
     showLoading();
     updateLoading(
-        "Generating journal...",
-        `Using ${provider}${providerModel ? ` (${providerModel})` : ""}`
+        isTextbook ? "Generating textbook..." : "Generating journal...",
+        `Using ${provider}${providerModel ? ` (${providerModel})` : ""}${isTextbook ? ` · ${numChapters} chapters` : ""}`
     );
+
+    const templateId = document.getElementById("template-select").value;
+    localStorage.setItem("autojurnal-template-id", templateId);
+
+    const hasData = document.getElementById("has-data").checked;
+    const userData = document.getElementById("user-data").value.trim() || null;
+    const body = {
+        theme,
+        papers: selectedPapers,
+        language,
+        target_length: targetLength,
+        multi_agent: multiAgent,
+        mode,
+        provider,
+        provider_model: providerModel,
+        provider_base_url: providerBaseUrl,
+        api_key: apiKey,
+        template_id: templateId || null,
+        has_data: hasData,
+        user_data: userData,
+        do_research: doResearch,
+        research_job_id: researchJobId,
+    };
+    if (isTextbook) body.num_chapters = numChapters;
 
     try {
         const resp = await fetch(`${API_BASE}/api/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                theme,
-                papers: selectedPapers,
-                language,
-                target_length: targetLength,
-                multi_agent: multiAgent,
-                provider,
-                provider_model: providerModel,
-                provider_base_url: providerBaseUrl,
-                api_key: apiKey,
-            }),
+            body: JSON.stringify(body),
         });
 
         if (!resp.ok) {
@@ -310,8 +580,10 @@ async function generateJournal() {
 
         hideLoading();
         document.getElementById("result-section").style.display = "block";
+        document.getElementById("result-label").textContent =
+            mode === "textbook" ? "Textbook" : "Journal";
         document.getElementById("journal-content").innerHTML =
-            marked.parse(currentJournal);
+            renderMarkdown(currentJournal);
         applyParagraphControls();
 
         if (data.token_usage) {
@@ -343,6 +615,22 @@ function showToast(msg, type = "success") {
     bootstrap.Toast.getOrCreateInstance(toast).show();
 }
 
+function renderMarkdown(text) {
+    const html = marked.parse(text);
+    // Wrap mermaid code blocks for live rendering
+    const withMermaid = html.replace(
+        /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
+        '<div class="mermaid">$1</div>'
+    );
+    // Render mermaid after DOM update
+    setTimeout(() => {
+        if (typeof mermaid !== "undefined") {
+            mermaid.run({ nodes: document.querySelectorAll(".mermaid") });
+        }
+    }, 100);
+    return withMermaid;
+}
+
 function stripMarkdown(text) {
     return text
         .replace(/^###+\s*/gm, "")   // ### headings
@@ -357,23 +645,28 @@ function stripMarkdown(text) {
         .trim();
 }
 
+function _cleanHtmlClipboard(html) {
+    // Strip base64 images (bloat clipboard, fail paste)
+    // Keep Markdown tables (converted to <table> by marked.js) — Word/Docs can render them
+    return html
+        .replace(/<img[^>]*src="data:image[^>]*>/gi, "")
+        .replace(/<div class="mermaid">[\s\S]*?<\/div>/gi, "");
+}
+
 function copyJournal() {
-    const rendered = document.getElementById("journal-content").innerHTML;
-    const style = document.querySelector("style").innerHTML;
-    const cleanHtml = rendered
-        .replace(/<button[\s\S]*?<\/button>/g, "")
-        .replace(/<div class="para-controls">[\s\S]*?<\/div>/g, "");
-    const styledHtml = `<html><head><style>${style}</style></head><body>${cleanHtml}</body></html>`;
-    const plainText = stripMarkdown(currentJournal);
+    const rawHtml = renderMarkdown(currentJournal);
+    const cleanHtml = `<html><body>${_cleanHtmlClipboard(rawHtml)}</body></html>`;
+    const plainText = currentJournal.trim();
 
     navigator.clipboard.write([
         new ClipboardItem({
-            "text/html": new Blob([styledHtml], { type: "text/html" }),
+            "text/html": new Blob([cleanHtml], { type: "text/html" }),
             "text/plain": new Blob([plainText], { type: "text/plain" }),
         }),
-    ]).then(() => showToast("Copied with rich text formatting!")).catch(() => {
+    ]).then(() => showToast("Copied!")).catch(() => {
+        // fallback jika ClipboardItem tidak didukung
         navigator.clipboard.writeText(plainText).then(() => {
-            showToast("Copied as plain text!");
+            showToast("Copied as markdown!");
         });
     });
 }
@@ -386,8 +679,8 @@ function copyPlainText() {
 }
 
 function downloadJournal() {
-    const plainText = stripMarkdown(currentJournal);
-    const blob = new Blob([plainText], { type: "text/markdown" });
+    // Raw markdown preserves ## structure
+    const blob = new Blob([currentJournal.trim()], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -397,7 +690,8 @@ function downloadJournal() {
 }
 
 async function regenerateJournal() {
-    if (!confirm("Regenerate journal with the same settings?")) return;
+    const mode = document.getElementById("mode").value;
+    if (!confirm(`Regenerate ${mode} with the same settings?`)) return;
     await generateJournal();
 }
 
@@ -477,4 +771,648 @@ function escapeHtml(text) {
     const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
+}
+
+
+// ---- Template Management ----
+
+async function loadTemplateList() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/templates`);
+        templates = await resp.json();
+        populateTemplateSelect();
+    } catch (e) {
+        console.error("Failed to load templates:", e);
+    }
+}
+
+const TEMPLATE_CATEGORIES = ["medical", "physics", "chemistry", "mathematics", "general"];
+const CATEGORY_LABELS = {
+    medical: "Medical",
+    physics: "Physics",
+    chemistry: "Chemistry",
+    mathematics: "Mathematics",
+    general: "General",
+};
+const CATEGORY_COLORS = {
+    medical: "bg-danger",
+    physics: "bg-primary",
+    chemistry: "bg-success",
+    mathematics: "bg-warning text-dark",
+    general: "bg-secondary",
+};
+
+function populateTemplateSelect() {
+    const sel = document.getElementById("template-select");
+    const rsel = document.getElementById("restructure-template-select");
+    const current = sel.value;
+    sel.innerHTML = '<option value="">Default (no template)</option>';
+    if (rsel) {
+        rsel.innerHTML = '<option value="">Select a template...</option>';
+    }
+    const grouped = {};
+    templates.forEach((t) => {
+        const cat = t.category || "general";
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(t);
+    });
+    TEMPLATE_CATEGORIES.forEach((cat) => {
+        const items = grouped[cat];
+        if (!items || items.length === 0) return;
+        const og = document.createElement("optgroup");
+        og.label = CATEGORY_LABELS[cat] || cat;
+        items.forEach((t) => {
+            const opt = document.createElement("option");
+            opt.value = t.id;
+            const label = t.name + (t.builtin ? "" : " (custom)");
+            opt.textContent = label;
+            if (t.type) opt.dataset.type = t.type;
+            og.appendChild(opt);
+        });
+        sel.appendChild(og);
+        if (rsel) {
+            const rog = og.cloneNode(true);
+            rsel.appendChild(rog);
+        }
+    });
+    // restore selection
+    const saved = localStorage.getItem("autojurnal-template-id");
+    if (saved && [...sel.options].some((o) => o.value === saved)) {
+        sel.value = saved;
+    } else if (current && [...sel.options].some((o) => o.value === current)) {
+        sel.value = current;
+    }
+}
+
+function openTemplateModal() {
+    renderTemplateList();
+    const modal = new bootstrap.Modal(document.getElementById("templateModal"));
+    modal.show();
+}
+
+async function renderTemplateList() {
+    const container = document.getElementById("template-list");
+    if (templates.length === 0) {
+        container.innerHTML = '<div class="text-muted text-center py-3">No templates available.</div>';
+        return;
+    }
+    const grouped = {};
+    templates.forEach((t) => {
+        const cat = t.category || "general";
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(t);
+    });
+    container.innerHTML = TEMPLATE_CATEGORIES
+        .filter((cat) => grouped[cat])
+        .map((cat) => {
+            const items = grouped[cat]
+                .map(
+                    (t) => `
+            <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>${escapeHtml(t.name)}</strong>
+                    <span class="badge ${CATEGORY_COLORS[cat] || "bg-secondary"} ms-2">${CATEGORY_LABELS[cat] || cat}</span>
+                    <span class="badge ${t.builtin ? "bg-secondary" : "bg-primary"} ms-1">${t.builtin ? "built-in" : "custom"}</span>
+                    <span class="badge bg-info ms-1">${t.type || "journal"}</span>
+                    <div class="text-muted small mt-1">
+                        ${t.sections ? t.sections.length + " sections" : ""}
+                        ${t.chapter_subsections ? t.chapter_subsections.length + " chapter subsections" : ""}
+                        ${t.constraints ? "· has constraints" : ""}
+                    </div>
+                </div>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-sm btn-outline-info" onclick="previewTemplate('${t.id}')" title="Preview">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    ${t.builtin ? "" : `<button class="btn btn-sm btn-outline-danger" onclick="deleteTemplate('${t.id}')" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>`}
+                </div>
+            </div>
+        `
+                )
+                .join("");
+            return `<h6 class="mt-3 mb-2 text-uppercase text-muted small">${CATEGORY_LABELS[cat] || cat}</h6>${items}`;
+        })
+        .join("");
+}
+
+async function previewTemplate(id) {
+    const t = templates.find((x) => x.id === id);
+    if (!t) return;
+    let info = `Name: ${t.name}\nType: ${t.type || "journal"}\n\n`;
+    if (t.sections) {
+        info += "Sections:\n";
+        t.sections.forEach((s, i) => {
+            info += `  ${i + 1}. ${s.heading_id}${s.heading_en ? " / " + s.heading_en : ""}\n`;
+        });
+    }
+    if (t.chapter_subsections) {
+        info += "Chapter Subsections:\n";
+        t.chapter_subsections.forEach((s, i) => {
+            info += `  ${i + 1}. ${s.heading_id}${s.heading_en ? " / " + s.heading_en : ""}\n`;
+        });
+    }
+    if (t.constraints) {
+        info += "\nConstraints:\n";
+        for (const [k, v] of Object.entries(t.constraints)) {
+            if (v) info += `  ${k}: ${v}\n`;
+        }
+    }
+    alert(info);
+}
+
+async function deleteTemplate(id) {
+    if (!confirm(`Delete template "${templates.find((t) => t.id === id)?.name}"?`)) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/templates/${id}`, { method: "DELETE" });
+        if (!resp.ok) throw new Error(await resp.text());
+        templates = templates.filter((t) => t.id !== id);
+        renderTemplateList();
+        populateTemplateSelect();
+        showToast("Template deleted");
+    } catch (e) {
+        alert("Failed to delete: " + e.message);
+    }
+}
+
+async function uploadAndParseTemplate() {
+    const input = document.getElementById("template-upload");
+    const file = input.files?.[0];
+    if (!file) {
+        alert("Please select a file first.");
+        return;
+    }
+
+    const loading = document.getElementById("template-parse-loading");
+    const loadingText = document.getElementById("template-parse-loading-text");
+    const resultDiv = document.getElementById("template-parse-result");
+    resultDiv.style.display = "none";
+    loading.style.display = "block";
+    loadingText.textContent = "Parsing guidelines with AI...";
+    parsedTemplate = null;
+
+    try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const resp = await fetch(`${API_BASE}/api/templates/parse`, {
+            method: "POST",
+            body: formData,
+        });
+        if (!resp.ok) {
+            const err = await resp.text();
+            throw new Error(err);
+        }
+        parsedTemplate = await resp.json();
+        loading.style.display = "none";
+        const info = document.getElementById("template-parse-info");
+        const name = parsedTemplate.name || "Untitled Template";
+        const sections = parsedTemplate.sections?.length || 0;
+        const subs = parsedTemplate.chapter_subsections?.length || 0;
+        info.textContent = `Detected: "${name}" — ${sections} sections${subs ? `, ${subs} chapter subsections` : ""}`;
+        resultDiv.style.display = "block";
+        showToast("Template parsed successfully. Review and save.");
+    } catch (e) {
+        loading.style.display = "none";
+        alert("Parse failed: " + e.message);
+    }
+}
+
+async function saveParsedTemplate() {
+    if (!parsedTemplate) return;
+    const name = parsedTemplate.name || prompt("Template name:") || "Untitled";
+    parsedTemplate.name = name;
+    try {
+        const resp = await fetch(`${API_BASE}/api/templates`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(parsedTemplate),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const saved = await resp.json();
+        templates.push(saved);
+        parsedTemplate = null;
+        document.getElementById("template-parse-result").style.display = "none";
+        document.getElementById("template-upload").value = "";
+        renderTemplateList();
+        populateTemplateSelect();
+        // Select the newly saved template
+        document.getElementById("template-select").value = saved.id;
+        saveSettings();
+        showToast("Template saved!");
+    } catch (e) {
+        alert("Failed to save: " + e.message);
+    }
+}
+
+
+// ---- Tab System ----
+
+function showTab(tab) {
+    document.getElementById("tab-generate").style.display = tab === "generate" ? "" : "none";
+    document.getElementById("tab-restructure").style.display = tab === "restructure" ? "" : "none";
+    document.getElementById("tab-review").style.display = tab === "review" ? "" : "none";
+    document.getElementById("tab-translate").style.display = tab === "translate" ? "" : "none";
+    document.getElementById("tab-generate-btn").classList.toggle("active", tab === "generate");
+    document.getElementById("tab-restructure-btn").classList.toggle("active", tab === "restructure");
+    document.getElementById("tab-review-btn").classList.toggle("active", tab === "review");
+    document.getElementById("tab-translate-btn").classList.toggle("active", tab === "translate");
+    document.getElementById("tab-generate-btn").classList.toggle("btn-outline-primary", tab !== "generate");
+    document.getElementById("tab-restructure-btn").classList.toggle("btn-outline-primary", tab !== "restructure");
+    document.getElementById("tab-review-btn").classList.toggle("btn-outline-primary", tab !== "review");
+    document.getElementById("tab-translate-btn").classList.toggle("btn-outline-primary", tab !== "translate");
+}
+
+
+// ---- Restructure ----
+
+let restructureSourceText = "";
+
+function parseRestructureSource() {
+    const fileInput = document.getElementById("restructure-file");
+    const linkInput = document.getElementById("restructure-link").value.trim();
+
+    if (!fileInput.files?.length && !linkInput) {
+        alert("Upload a file or paste a Google Drive/Docs link.");
+        return;
+    }
+
+    showLoading();
+    updateLoading("Parsing source document...", "Extracting structure...");
+
+    let url = `${API_BASE}/api/restructure/parse`;
+    const opts = { method: "POST" };
+
+    if (fileInput.files?.length) {
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+        opts.body = formData;
+    } else {
+        url += `?file_url=${encodeURIComponent(linkInput)}`;
+    }
+
+    fetch(url, opts)
+        .then(async (resp) => {
+            if (!resp.ok) throw new Error(await resp.text());
+            return resp.json();
+        })
+        .then((data) => {
+            hideLoading();
+            restructureSourceText = data.source_text;
+            renderDetectedSections(data.headings || data.sections);
+            document.getElementById("restructure-detected-section").style.display = "";
+            document.getElementById("restructure-btn").disabled = false;
+            showToast(`Found ${data.headings?.length || data.sections?.length || 0} sections`);
+        })
+        .catch((err) => {
+            updateLoading("Parse failed", err.message.substring(0, 300), true);
+            setTimeout(hideLoading, 5000);
+        });
+}
+
+function renderDetectedSections(headings) {
+    const container = document.getElementById("restructure-detected-list");
+    const count = document.getElementById("restructure-section-count");
+    if (!headings || headings.length === 0) {
+        container.innerHTML = '<div class="text-muted text-center py-3">No headings detected. Plain text will be used as-is.</div>';
+        count.textContent = "0 sections";
+        return;
+    }
+    count.textContent = `${headings.length} sections`;
+    container.innerHTML = headings
+        .map(
+            (h, i) => `
+        <div class="list-group-item list-group-item-action d-flex align-items-center gap-2">
+            <span class="badge bg-secondary">${"#".repeat(h.level || 2)}</span>
+            <span>${escapeHtml(h.heading || "Section " + (i + 1))}</span>
+        </div>
+    `
+        )
+        .join("");
+}
+
+async function restructureDoc() {
+    const templateId = document.getElementById("restructure-template-select").value;
+    const language = document.getElementById("restructure-language").value;
+
+    if (!templateId) {
+        alert("Select a target template.");
+        return;
+    }
+    if (!restructureSourceText) {
+        alert("Parse a source document first.");
+        return;
+    }
+
+    showLoading();
+    updateLoading("Restructuring document...", `Using template: ${templates.find(t => t.id === templateId)?.name || templateId}`);
+
+    const provider = document.getElementById("provider").value;
+    const providerModel =
+        document.getElementById("provider-model").value.trim() || null;
+    const providerBaseUrl =
+        document.getElementById("provider-base-url").value.trim() || null;
+    const apiKey =
+        document.getElementById("llm-api-key").value.trim() || null;
+    const hasData = document.getElementById("has-data").checked;
+    const userData = document.getElementById("user-data").value.trim() || null;
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/restructure`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                source_text: restructureSourceText,
+                template_id: templateId,
+                language: language,
+                provider,
+                provider_model: providerModel,
+                provider_base_url: providerBaseUrl,
+                api_key: apiKey,
+                has_data: hasData,
+                user_data: userData,
+            }),
+        });
+
+        if (!resp.ok) throw new Error(await resp.text());
+
+        const data = await resp.json();
+        hideLoading();
+
+        document.getElementById("restructure-result-section").style.display = "";
+        const rcEl = document.getElementById("restructured-content");
+        rcEl.innerHTML = renderMarkdown(data.restructured_text);
+        rcEl.dataset.raw = data.restructured_text;
+
+        if (data.token_usage) {
+            const tu = data.token_usage;
+            const el = document.getElementById("restructure-token-usage");
+            if (el) {
+                el.textContent = `Tokens (estimated) — Input: ${(tu.input_tokens || 0).toLocaleString()} · Output: ${(tu.output_tokens || 0).toLocaleString()}`;
+                el.style.display = "block";
+            }
+        }
+
+        document.getElementById("restructured-content").scrollIntoView({ behavior: "smooth" });
+    } catch (err) {
+        updateLoading("Restructure failed", err.message.substring(0, 300), true);
+        setTimeout(hideLoading, 8000);
+    }
+}
+
+function copyRestructured() {
+    const el = document.getElementById("restructured-content");
+    const rawMarkdown = el.dataset.raw || el.textContent || "";
+    const rawHtml = renderMarkdown(rawMarkdown);
+    const cleanHtml = `<html><body>${_cleanHtmlClipboard(rawHtml)}</body></html>`;
+    const plainText = rawMarkdown.trim();
+
+    navigator.clipboard.write([
+        new ClipboardItem({
+            "text/html": new Blob([cleanHtml], { type: "text/html" }),
+            "text/plain": new Blob([plainText], { type: "text/plain" }),
+        }),
+    ]).then(() => showToast("Copied!")).catch(() => {
+        navigator.clipboard.writeText(plainText).then(() => showToast("Copied as markdown!"));
+    });
+}
+
+function downloadRestructured() {
+    const el = document.getElementById("restructured-content");
+    const text = el.dataset.raw || el.textContent || "";
+    const blob = new Blob([text], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "restructured.md";
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+// ── Human Review ──────────────────────────────────────────
+
+async function parseReviewedDocument() {
+    const fileInput = document.getElementById("review-upload-input");
+    const linkInput = document.getElementById("review-link-input").value.trim();
+    const file = fileInput.files?.[0];
+
+    if (!file && !linkInput) {
+        showToast("Upload a .docx file or paste a Google Docs link.", "warning");
+        return;
+    }
+
+    updateLoading("Parsing reviewed document...");
+    showLoading();
+
+    try {
+        let url = `${API_BASE}/api/revise/parse`;
+        let body;
+        if (file) {
+            const form = new FormData();
+            form.append("file", file);
+            if (linkInput) form.append("file_url", linkInput);
+            body = form;
+        } else {
+            const form = new FormData();
+            form.append("file", "");
+            form.append("file_url", linkInput);
+            body = form;
+        }
+
+        const resp = await fetch(url, { method: "POST", body });
+        if (!resp.ok) throw new Error(await resp.text());
+
+        const data = await resp.json();
+        hideLoading();
+
+        document.getElementById("review-document").value = data.source_text;
+        document.getElementById("review-text").value = data.review_text;
+
+        if (data.comment_count > 0) {
+            showToast(`Extracted ${data.comment_count} comments from .docx`, "success");
+        } else {
+            showToast("Document loaded", "success");
+        }
+    } catch (err) {
+        hideLoading();
+        showToast("Parse failed: " + err.message.substring(0, 300), "danger");
+    }
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+    document.getElementById("review-upload-input").addEventListener("change", function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const name = file.name.toLowerCase();
+        if (name.endsWith(".docx") || name.endsWith(".DOCX")) {
+            parseReviewedDocument();
+        } else {
+            const reader = new FileReader();
+            reader.onload = function (ev) {
+                document.getElementById("review-document").value = ev.target.result;
+            };
+            reader.readAsText(file);
+        }
+    });
+});
+
+async function reviseWithReview() {
+    const sourceText = document.getElementById("review-document").value.trim();
+    const reviewText = document.getElementById("review-text").value.trim();
+    const language = document.getElementById("review-language").value;
+    if (!sourceText) { showToast("Please paste the original document first.", "warning"); return; }
+    if (!reviewText) { showToast("Please paste the reviewer feedback.", "warning"); return; }
+
+    const provider = document.getElementById("provider").value;
+    const providerModel = document.getElementById("provider-model").value;
+    const providerBaseUrl = document.getElementById("provider-base-url").value;
+    const apiKey = document.getElementById("llm-api-key").value;
+
+    updateLoading("Revising document based on reviewer feedback...");
+    showLoading();
+    document.getElementById("review-result-section").style.display = "none";
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/revise`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                source_text: sourceText,
+                review_text: reviewText,
+                language,
+                provider,
+                provider_model: providerModel || null,
+                provider_base_url: providerBaseUrl || null,
+                api_key: apiKey || null,
+            }),
+        });
+
+        if (!resp.ok) throw new Error(await resp.text());
+
+        const data = await resp.json();
+        hideLoading();
+
+        document.getElementById("review-result-section").style.display = "";
+        const rcEl = document.getElementById("review-content");
+        rcEl.innerHTML = renderMarkdown(data.revised_text);
+        rcEl.dataset.raw = data.revised_text;
+
+        document.getElementById("review-content").scrollIntoView({ behavior: "smooth" });
+    } catch (err) {
+        hideLoading();
+        showToast("Revise failed: " + err.message.substring(0, 300), "danger");
+    }
+}
+
+function copyReviewResult() {
+    const el = document.getElementById("review-content");
+    const rawMarkdown = el.dataset.raw || el.textContent || "";
+    const rawHtml = renderMarkdown(rawMarkdown);
+    const cleanHtml = `<html><body>${_cleanHtmlClipboard(rawHtml)}</body></html>`;
+    const plainText = rawMarkdown.trim();
+
+    navigator.clipboard.write([
+        new ClipboardItem({
+            "text/html": new Blob([cleanHtml], { type: "text/html" }),
+            "text/plain": new Blob([plainText], { type: "text/plain" }),
+        }),
+    ]).then(() => showToast("Copied!")).catch(() => {
+        navigator.clipboard.writeText(plainText).then(() => showToast("Copied as markdown!"));
+    });
+}
+
+function downloadReviewResult() {
+    const el = document.getElementById("review-content");
+    const text = el.dataset.raw || el.textContent || "";
+    const blob = new Blob([text], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "revised-document.md";
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+
+// ---- Translate ----
+
+async function translateDoc() {
+    const sourceText = document.getElementById("translate-source-text").value.trim();
+    const srcLang = document.getElementById("translate-source-lang").value;
+    const tgtLang = document.getElementById("translate-target-lang").value;
+    if (!sourceText) { showToast("Please paste the document text to translate.", "warning"); return; }
+    if (srcLang === tgtLang) { showToast("Source and target languages must differ.", "warning"); return; }
+
+    const provider = document.getElementById("provider").value;
+    const providerModel = document.getElementById("provider-model").value;
+    const providerBaseUrl = document.getElementById("provider-base-url").value;
+    const apiKey = document.getElementById("llm-api-key").value;
+
+    updateLoading("Translating...");
+    showLoading();
+    document.getElementById("translate-result-section").style.display = "none";
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/translate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                source_text: sourceText,
+                source_language: srcLang,
+                target_language: tgtLang,
+                provider,
+                provider_model: providerModel || null,
+                provider_base_url: providerBaseUrl || null,
+                api_key: apiKey || null,
+            }),
+        });
+
+        if (!resp.ok) throw new Error(await resp.text());
+
+        const data = await resp.json();
+        hideLoading();
+
+        document.getElementById("translate-result-section").style.display = "";
+        const outEl = document.getElementById("translate-output");
+        outEl.innerHTML = renderMarkdown(data.translated_text);
+        outEl.dataset.raw = data.translated_text;
+
+        const badge = document.getElementById("translate-token-badge");
+        if (data.token_usage) {
+            badge.textContent = `in:${data.token_usage.input_tokens} out:${data.token_usage.output_tokens}`;
+        } else {
+            badge.textContent = "";
+        }
+
+        outEl.scrollIntoView({ behavior: "smooth" });
+    } catch (err) {
+        hideLoading();
+        showToast("Translation failed: " + err.message.substring(0, 300), "danger");
+    }
+}
+
+function copyTranslated() {
+    const el = document.getElementById("translate-output");
+    const rawMarkdown = el.dataset.raw || el.textContent || "";
+    const rawHtml = renderMarkdown(rawMarkdown);
+    const cleanHtml = `<html><body>${_cleanHtmlClipboard(rawHtml)}</body></html>`;
+    const plainText = rawMarkdown.trim();
+
+    navigator.clipboard.write([
+        new ClipboardItem({
+            "text/html": new Blob([cleanHtml], { type: "text/html" }),
+            "text/plain": new Blob([plainText], { type: "text/plain" }),
+        }),
+    ]).then(() => showToast("Copied!")).catch(() => {
+        navigator.clipboard.writeText(plainText).then(() => showToast("Copied as markdown!"));
+    });
+}
+
+function downloadTranslated() {
+    const el = document.getElementById("translate-output");
+    const text = el.dataset.raw || el.textContent || "";
+    const blob = new Blob([text], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "translated-document.md";
+    a.click();
+    URL.revokeObjectURL(a.href);
 }

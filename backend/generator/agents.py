@@ -1,10 +1,11 @@
+import re
 from typing import Optional
-from ..search.openalex import Paper
-from ..providers.base import LLMProvider
-from ..rag.store import store
+from search.openalex import Paper
+from providers.base import LLMProvider
+from rag.store import store
 
 
-SECTION_ORDER = [
+DEFAULT_SECTION_ORDER = [
     "title_abstract",
     "introduction",
     "literature_review",
@@ -13,7 +14,7 @@ SECTION_ORDER = [
     "conclusion",
 ]
 
-SECTION_META = {
+DEFAULT_SECTION_META = {
     "id": {
         "title_abstract":  "## Judul\n## Abstrak",
         "introduction":    "## Pendahuluan",
@@ -40,6 +41,26 @@ RAG_QUERIES = {
     "conclusion":        "{theme} conclusion implication limitation recommendation",
 }
 
+
+def _make_section_key(heading_id: str) -> str:
+    key = re.sub(r"[^a-zA-Z0-9_]", "_", heading_id.strip())
+    key = re.sub(r"_+", "_", key).strip("_").lower()
+    return key or "section"
+
+
+def _template_to_sections(template: dict, lang: str) -> tuple[list[str], dict]:
+    sections_data = template.get("sections", [])
+    section_order = []
+    section_meta = {}
+    for sec in sections_data:
+        heading = sec.get(f"heading_{lang}", sec.get("heading_id", ""))
+        key = _make_section_key(heading)
+        section_order.append(key)
+        section_meta[key] = heading
+    if not section_order:
+        return DEFAULT_SECTION_ORDER, DEFAULT_SECTION_META[lang]
+    return section_order, section_meta
+
 WORD_TARGET = {
     "short":    {"per_section": "250-400",    "total": "1500-2000"},
     "medium":   {"per_section": "700-1200",   "total": "4000-6000"},
@@ -48,7 +69,87 @@ WORD_TARGET = {
 }
 
 
+METHODOLOGY_EXAMPLES = {
+    "id": (
+        "Contoh 1 — Pendidikan (Kualitatif):\n"
+        "  Pendekatan: Kualitatif\n"
+        "  Paradigma: Interpretivisme\n"
+        "  Metode Analisis: Analisis Tematik\n"
+        "  Alasan: Untuk memahami pengalaman subjektif siswa dalam pembelajaran daring melalui wawancara mendalam.\n\n"
+        "Contoh 2 — Kesehatan Masyarakat (Kuantitatif):\n"
+        "  Pendekatan: Kuantitatif\n"
+        "  Paradigma: Post-positivisme\n"
+        "  Metode Analisis: Regresi Logistik\n"
+        "  Alasan: Untuk menguji hubungan antara faktor risiko dan kejadian penyakit dengan data survei skala besar.\n\n"
+        "Contoh 3 — Ekonomi (Mixed Method):\n"
+        "  Pendekatan: Mixed Method\n"
+        "  Paradigma: Pragmatisme\n"
+        "  Metode Analisis: Sequential Explanatory (Kuantitatif: Regresi Panel, Kualitatif: Analisis Isi)\n"
+        "  Alasan: Data kuantitatif menjelaskan pola, data kualitatif memperdalam pemahaman konteks.\n\n"
+        "Contoh 4 — Psikologi (Kualitatif):\n"
+        "  Pendekatan: Kualitatif\n"
+        "  Paradigma: Konstruktivisme\n"
+        "  Metode Analisis: Grounded Theory\n"
+        "  Alasan: Untuk mengembangkan teori baru tentang adaptasi psikologis berdasarkan data lapangan.\n\n"
+        "Contoh 5 — Ilmu Komputer (Kuantitatif):\n"
+        "  Pendekatan: Kuantitatif\n"
+        "  Paradigma: Positivisme\n"
+        "  Metode Analisis: Eksperimen dengan Uji-t\n"
+        "  Alasan: Untuk mengukur perbedaan kinerja antara dua algoritma secara statistik."
+    ),
+    "en": (
+        "Example 1 — Education (Qualitative):\n"
+        "  Approach: Qualitative\n"
+        "  Paradigm: Interpretivism\n"
+        "  Analysis Method: Thematic Analysis\n"
+        "  Rationale: To understand students' subjective experiences in online learning through in-depth interviews.\n\n"
+        "Example 2 — Public Health (Quantitative):\n"
+        "  Approach: Quantitative\n"
+        "  Paradigm: Post-positivism\n"
+        "  Analysis Method: Logistic Regression\n"
+        "  Rationale: To test the relationship between risk factors and disease incidence using large-scale survey data.\n\n"
+        "Example 3 — Economics (Mixed Method):\n"
+        "  Approach: Mixed Method\n"
+        "  Paradigm: Pragmatism\n"
+        "  Analysis Method: Sequential Explanatory (Quant: Panel Regression, Qual: Content Analysis)\n"
+        "  Rationale: Quantitative data explains patterns, qualitative data deepens contextual understanding.\n\n"
+        "Example 4 — Psychology (Qualitative):\n"
+        "  Approach: Qualitative\n"
+        "  Paradigm: Constructivism\n"
+        "  Analysis Method: Grounded Theory\n"
+        "  Rationale: To develop a new theory of psychological adaptation based on field data.\n\n"
+        "Example 5 — Computer Science (Quantitative):\n"
+        "  Approach: Quantitative\n"
+        "  Paradigm: Positivism\n"
+        "  Analysis Method: Experiment with T-test\n"
+        "  Rationale: To measure the statistical performance difference between two algorithms."
+    ),
+}
+
+
 SYSTEM_PROMPTS = {
+    "methodology_analyst": {
+        "id": (
+            "Anda adalah Methodology Analyst yang ahli dalam metodologi penelitian. "
+            "Tugas Anda adalah menentukan pendekatan penelitian, paradigma, dan metode analisis "
+            "yang PALING TEPAT untuk sebuah tema penelitian akademik. "
+            "Anda memahami berbagai paradigma (positivisme, post-positivisme, interpretivisme, "
+            "konstruktivisme, teori kritis, pragmatisme) dan metode analisis "
+            "(tematik, grounded theory, fenomenologi, naratif, etnografi, studi kasus, "
+            "regresi, SEM, ANOVA, analisis konten, dan lain-lain). "
+            "Anda selalu memberikan rekomendasi yang spesifik, logis, dan dapat dipertanggungjawabkan secara ilmiah."
+        ),
+        "en": (
+            "You are a Methodology Analyst specialized in research methodology. "
+            "Your task is to determine the MOST APPROPRIATE research approach, paradigm, and analysis method "
+            "for an academic research theme. "
+            "You understand various paradigms (positivism, post-positivism, interpretivism, "
+            "constructivism, critical theory, pragmatism) and analysis methods "
+            "(thematic, grounded theory, phenomenology, narrative, ethnography, case study, "
+            "regression, SEM, ANOVA, content analysis, etc.). "
+            "You always give specific, logical, and scientifically justifiable recommendations."
+        ),
+    },
     "lead_researcher": {
         "id": (
             "Anda adalah Lead Researcher yang ahli dalam metodologi penelitian kualitatif. "
@@ -105,6 +206,26 @@ SYSTEM_PROMPTS = {
             "(4) depth of analysis, and "
             "(5) citation accuracy. "
             "You provide constructive, specific, and actionable criticism."
+        ),
+    },
+    "lead_story": {
+        "id": (
+            "Anda adalah Lead Storyteller yang ahli dalam menyajikan penelitian "
+            "secara naratif dan deskriptif. Tugas Anda adalah memperkaya naskah akademik "
+            "dengan elemen cerita, ilustrasi konkret, analogi, dan contoh nyata "
+            "tanpa mengorbankan ketelitian ilmiah. Anda mengubah data dan temuan "
+            "menjadi narasi yang hidup dan mudah dipahami. "
+            "Anda BUKAN mengubah fakta — Anda menyajikannya dengan gaya bercerita "
+            "yang tetap akademik dan profesional."
+        ),
+        "en": (
+            "You are a Lead Storyteller specialized in presenting research "
+            "in a narrative and descriptive way. Your role is to enrich academic manuscripts "
+            "with story elements, concrete illustrations, analogies, and real examples "
+            "without sacrificing scientific rigor. You transform data and findings "
+            "into vivid, easy-to-understand narratives. "
+            "You do NOT change facts — you present them in a storytelling style "
+            "that remains academic and professional."
         ),
     },
     "humanizer": {
@@ -182,7 +303,47 @@ def _get_paper_list(papers: list[Paper]) -> str:
 
 # ---- Prompt builders ----
 
-def _researcher_prompt(language: str, section_key: str, theme: str, section_heading: str, rag: str, previous: str) -> str:
+def _format_template_constraints(template: Optional[dict], lang: str) -> str:
+    if not template:
+        return ""
+    constraints = template.get("constraints") or {}
+    parts = []
+    if constraints.get("abstrak_maks"):
+        if lang == "id":
+            parts.append(f"- Abstrak maksimal {constraints['abstrak_maks']} kata")
+        else:
+            parts.append(f"- Abstract maximum {constraints['abstrak_maks']} words")
+    if constraints.get("kata_kunci_maks"):
+        if lang == "id":
+            parts.append(f"- Maksimal {constraints['kata_kunci_maks']} kata kunci")
+        else:
+            parts.append(f"- Maximum {constraints['kata_kunci_maks']} keywords")
+    if constraints.get("citation_style"):
+        parts.append(f"- Citation style: {constraints['citation_style']}")
+    if not parts:
+        return ""
+    header = "ATURAN TEMPLATE:" if lang == "id" else "TEMPLATE RULES:"
+    return f"\n\n{header}\n" + "\n".join(parts)
+
+
+def _format_template_sections(template: Optional[dict], lang: str) -> str:
+    if not template:
+        return ""
+    sections = template.get("sections", [])
+    if not sections:
+        return ""
+    items = []
+    for s in sections:
+        heading = s.get(f"heading_{lang}", s.get("heading_id", ""))
+        if heading:
+            items.append(f"- {heading}")
+    header = "STRUKTUR TEMPLATE (urutan bagian yang harus diikuti):" if lang == "id" else "TEMPLATE STRUCTURE (sections to follow in order):"
+    return f"\n\n{header}\n" + "\n".join(items)
+
+
+def _researcher_prompt(language: str, section_key: str, theme: str, section_heading: str, rag: str, previous: str, template: Optional[dict] = None) -> str:
+    template_block = _format_template_sections(template, language)
+    template_block += _format_template_constraints(template, language)
     if language == "id":
         return f"""Tema Penelitian: "{theme}"
 
@@ -191,7 +352,7 @@ Bagian yang akan ditulis: {section_heading}
 Konteks dari paper yang relevan:
 {rag or "(tidak ada konten spesifik)"}
 
-{('Bagian yang sudah ditulis sebelumnya:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}
+{('Bagian yang sudah ditulis sebelumnya:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}{template_block}
 
 Tugas Anda sebagai Lead Researcher:
 Buatlah rencana penelitian yang DETAIL untuk bagian {section_heading}.
@@ -264,7 +425,20 @@ For each finding:
 Output ONLY the synthesized findings, organized by theme."""
 
 
-def _writer_prompt(language: str, section_key: str, theme: str, section_heading: str, research_plan: str, findings: str, word_target: str, previous: str, paper_list: str) -> str:
+def _writer_prompt(language: str, section_key: str, theme: str, section_heading: str, research_plan: str, findings: str, word_target: str, previous: str, paper_list: str, has_data: bool = False, user_data: Optional[str] = None) -> str:
+    from diagrams.prompts import diagram_instruction
+    diagram_block = diagram_instruction(has_data, language, user_data)
+
+    no_ref = (
+        "\n\nPENTING: HANYA gunakan sitasi inline (Penulis, Tahun). "
+        "JANGAN pernah mencantumkan judul jurnal, volume, nomor, halaman, DOI, atau URL di badan artikel. "
+        "Referensi lengkap hanya di bagian Daftar Pustaka."
+        if language == "id"
+        else "\n\nIMPORTANT: Only use inline citations (Author, Year). "
+        "NEVER include journal name, volume, issue, pages, DOI, or URLs in the article body. "
+        "Full references belong only in the References section."
+    )
+
     if language == "id":
         base = f"""Tema Penelitian: "{theme}"
 Bagian yang akan ditulis: {section_heading}
@@ -285,7 +459,7 @@ ATURAN PENULISAN:
 2. Setiap klaim WAJIB disertai sitasi inline format APA: (Penulis, Tahun)
 3. Tulis kalimat ORISINAL — jangan menyalin dari konteks atau abstrak
 4. Target panjang: sekitar {word_target} kata untuk bagian ini
-5. Output ONLY konten bagian dengan heading ##, tanpa komentar tambahan"""
+5. Output ONLY konten bagian dengan heading ##, tanpa komentar tambahan{diagram_block}{no_ref}"""
     else:
         base = f"""Research Theme: "{theme}"
 Section to write: {section_heading}
@@ -306,7 +480,7 @@ WRITING RULES:
 2. Every claim MUST have an inline APA citation: (Author, Year)
 3. Write ORIGINAL sentences — do not copy from context or abstracts
 4. Target length: approximately {word_target} words for this section
-5. Output ONLY the section content with ## headings, no extra commentary"""
+5. Output ONLY the section content with ## headings, no extra commentary{diagram_block}{no_ref}"""
 
     if section_key == "title_abstract":
         base += (
@@ -571,6 +745,133 @@ Guidelines:
 Output ONLY the humanized text with ## headings, no extra commentary."""
 
 
+def _methodology_prompt(language: str, theme: str, paper_list: str, template: Optional[dict] = None) -> str:
+    examples = METHODOLOGY_EXAMPLES[language]
+    if language == "id":
+        tpl_info = ""
+        if template:
+            tpl_name = template.get("name", "")
+            tpl_type = template.get("type", "")
+            tpl_cat = template.get("category", "")
+            tpl_info = f"\nJenis Template: {tpl_name} (tipe: {tpl_type}, kategori: {tpl_cat})"
+        return f"""Tema Penelitian: "{theme}"{tpl_info}
+
+Paper yang Tersedia:
+{paper_list or "(tidak ada paper)"}
+
+Tugas Anda sebagai Methodology Analyst:
+
+Analisis tema penelitian dan paper di atas, lalu tentukan metodologi penelitian yang PALING TEPAT.
+
+Berikan output dalam format berikut (HANYA 4 baris, tanpa komentar tambahan):
+
+Pendekatan: [Kualitatif / Kuantitatif / Mixed Method]
+Paradigma: [nama paradigma]
+Metode Analisis: [nama metode analisis]
+Alasan: [1-2 kalimat singkat menjelaskan mengapa metodologi ini tepat]
+
+Pilihan pendekatan dan paradigma:
+- Kualitatif → Interpretivisme, Konstruktivisme, Teori Kritis, Partisipatoris
+- Kuantitatif → Positivisme, Post-positivisme
+- Mixed Method → Pragmatisme
+
+Pilihan metode analisis (sesuaikan dengan bidang):
+- Kualitatif: Analisis Tematik, Analisis Isi, Grounded Theory, Analisis Naratif, Analisis Wacana, Fenomenologi, Etnografi, Studi Kasus
+- Kuantitatif: Statistik Deskriptif, Statistik Inferensial, Regresi Linier, Regresi Logistik, SEM, ANOVA, Uji-t, Korelasi, Chi-square, Analisis Faktor
+- Mixed: Sequential Explanatory, Sequential Exploratory, Convergent Parallel
+
+Contoh:
+{examples}
+
+Output ONLY 4 baris di atas, tanpa format lain."""
+    tpl_info = ""
+    if template:
+        tpl_name = template.get("name", "")
+        tpl_type = template.get("type", "")
+        tpl_cat = template.get("category", "")
+        tpl_info = f"\nTemplate Type: {tpl_name} (type: {tpl_type}, category: {tpl_cat})"
+    return f"""Research Theme: "{theme}"{tpl_info}
+
+Available Papers:
+{paper_list or "(no papers)"}
+
+Your task as Methodology Analyst:
+
+Analyze the research theme and papers above, then determine the MOST APPROPRIATE research methodology.
+
+Output in the following format (ONLY 4 lines, no extra commentary):
+
+Approach: [Qualitative / Quantitative / Mixed Method]
+Paradigm: [paradigm name]
+Analysis Method: [analysis method name]
+Rationale: [1-2 short sentences explaining why this methodology is appropriate]
+
+Approach and paradigm options:
+- Qualitative → Interpretivism, Constructivism, Critical Theory, Participatory
+- Quantitative → Positivism, Post-positivism
+- Mixed Method → Pragmatism
+
+Analysis method options (adjust to field):
+- Qualitative: Thematic Analysis, Content Analysis, Grounded Theory, Narrative Analysis, Discourse Analysis, Phenomenology, Ethnography, Case Study
+- Quantitative: Descriptive Statistics, Inferential Statistics, Linear Regression, Logistic Regression, SEM, ANOVA, T-test, Correlation, Chi-square, Factor Analysis
+- Mixed: Sequential Explanatory, Sequential Exploratory, Convergent Parallel
+
+Examples:
+{examples}
+
+Output ONLY the 4 lines above, no other format."""
+
+
+def _lead_story_prompt(language: str, section_key: str, theme: str, section_heading: str, section_content: str, methodology_context: str) -> str:
+    if language == "id":
+        return f"""Tema Penelitian: "{theme}"
+Bagian: {section_heading}
+
+{methodology_context}
+
+NASKAH YANG AKAN DIPERKAYA:
+{section_content}
+
+---
+
+Tugas Anda sebagai Lead Storyteller:
+
+Perkaya naskah di atas dengan elemen naratif dan deskriptif tanpa mengubah fakta atau data.
+
+Petunjuk:
+1. **Deskripsi konkret** — Ubah pernyataan abstrak menjadi gambaran yang hidup. Contoh: alih-alih "partisipan merasa cemas", tulis "partisipan menggambarkan perasaan cemas yang muncul sebagai debar jantung yang cepat dan pikiran yang tidak bisa tenang".
+2. **Ilustrasi dan analogi** — Tambahkan analogi atau perumpamaan yang relevan untuk menjelaskan konsep kompleks.
+3. **Contoh nyata** — Jika data memungkinkan, tambahkan contoh spesifik atau ilustrasi singkat yang membantu pembaca memahami temuan.
+4. **Alur naratif** — Pastikan paragraf mengalir seperti cerita, dengan transisi yang halus antar ide.
+5. **Pertahankan** semua sitasi (Penulis, Tahun), heading ##, dan makna asli.
+6. **JANGAN** mengubah fakta, data, atau argumen ilmiah.
+7. **JANGAN** menambah klaim baru tanpa dukungan dari naskah asli.
+8. **Output ONLY** naskah yang sudah diperkaya, tanpa komentar tambahan."""
+    return f"""Research Theme: "{theme}"
+Section: {section_heading}
+
+{methodology_context}
+
+TEXT TO ENRICH:
+{section_content}
+
+---
+
+Your task as Lead Storyteller:
+
+Enrich the text above with narrative and descriptive elements without changing facts or data.
+
+Guidelines:
+1. **Concrete description** — Turn abstract statements into vivid portrayals. E.g., instead of "participants felt anxious", write "participants described anxiety as a racing heartbeat and restless thoughts".
+2. **Illustrations and analogies** — Add relevant analogies or comparisons to explain complex concepts.
+3. **Real examples** — Where data allows, add specific examples or brief illustrations to help readers understand findings.
+4. **Narrative flow** — Ensure paragraphs flow like a story, with smooth transitions between ideas.
+5. **Preserve** all citations (Author, Year), ## headings, and original meaning.
+6. **DO NOT** change facts, data, or scientific arguments.
+7. **DO NOT** add new claims not supported by the original text.
+8. **Output ONLY** the enriched text, no extra commentary."""
+
+
 # ---- Orchestration ----
 
 async def generate_multi_agent(
@@ -579,63 +880,105 @@ async def generate_multi_agent(
     theme: str,
     language: str,
     target_length: str,
+    template: Optional[dict] = None,
+    has_data: bool = False,
+    user_data: Optional[str] = None,
 ) -> tuple[str, dict]:
     tracker = TokenTracker()
     lang = "id" if language == "id" else "en"
-    headings = SECTION_META[lang]
+
+    if template and template.get("sections"):
+        section_order, headings = _template_to_sections(template, lang)
+        print(f"[Agent] Using template '{template.get('name', 'unnamed')}' with {len(section_order)} sections")
+    else:
+        section_order = DEFAULT_SECTION_ORDER
+        headings = DEFAULT_SECTION_META[lang]
+
     word_info = WORD_TARGET.get(target_length, WORD_TARGET["medium"])
     word_target = word_info["per_section"]
 
-    all_content = ""
     paper_list = _get_paper_list(papers)
 
-    for section_key in SECTION_ORDER:
+    # ---- Step 0: Methodology Analyst (runs once) ----
+    methodology_sys = SYSTEM_PROMPTS["methodology_analyst"][lang]
+    methodology_task = _methodology_prompt(lang, theme, paper_list, template)
+    methodology_context = await tracker.run(provider, methodology_sys, methodology_task)
+    print(f"[Agent] Methodology Analyst done: {len(methodology_context)} chars")
+    print(f"[Agent] Methodology:\n{methodology_context}")
+
+    # Build template + methodology context to inject into every system prompt
+    template_ctx = ""
+    if template:
+        template_ctx = _format_template_sections(template, lang) + _format_template_constraints(template, lang) + "\n\n"
+    template_ctx += f"METODOLOGI PENELITIAN:\n{methodology_context}\n\n" if lang == "id" else f"RESEARCH METHODOLOGY:\n{methodology_context}\n\n"
+
+    all_content = ""
+    prev_titles = ""
+
+    for section_key in section_order:
         heading = headings[section_key]
         print(f"[Agent] Processing section: {section_key} ({heading})")
 
         query_template = RAG_QUERIES.get(section_key)
-        rag = _rag_context(papers, query_template.format(theme=theme)) if query_template else ""
+        if query_template:
+            query = query_template.format(theme=theme)
+        else:
+            clean_heading = heading.replace("##", "").replace("\n", " ").strip()
+            query = f"{theme} {clean_heading}"
+        rag = _rag_context(papers, query) if query else ""
 
         # 1. Lead Researcher
-        researcher_sys = SYSTEM_PROMPTS["lead_researcher"][lang]
-        task = _researcher_prompt(lang, section_key, theme, heading, rag, all_content)
+        researcher_sys = template_ctx + SYSTEM_PROMPTS["lead_researcher"][lang]
+        task = _researcher_prompt(lang, section_key, theme, heading, rag, prev_titles)
         research_plan = await tracker.run(provider, researcher_sys, task)
         print(f"[Agent] Lead Researcher done: {len(research_plan)} chars")
 
         # 2. Source Reviewer
-        reviewer_sys = SYSTEM_PROMPTS["source_reviewer"][lang]
+        reviewer_sys = template_ctx + SYSTEM_PROMPTS["source_reviewer"][lang]
         task = _reviewer_prompt(lang, section_key, theme, heading, research_plan, rag)
         findings = await tracker.run(provider, reviewer_sys, task)
         print(f"[Agent] Source Reviewer done: {len(findings)} chars")
 
         # 3. Lead Writer (first draft)
-        writer_sys = SYSTEM_PROMPTS["lead_writer"][lang]
-        task = _writer_prompt(lang, section_key, theme, heading, research_plan, findings, word_target, all_content, paper_list)
+        writer_sys = template_ctx + SYSTEM_PROMPTS["lead_writer"][lang]
+        task = _writer_prompt(lang, section_key, theme, heading, research_plan, findings, word_target, prev_titles, paper_list, has_data, user_data)
         section_content = await tracker.run(provider, writer_sys, task)
         print(f"[Agent] Lead Writer (draft) done: {len(section_content)} chars")
 
+        # 3b. Lead Storyteller (enrich descriptiveness)
+        story_sys = template_ctx + SYSTEM_PROMPTS["lead_story"][lang]
+        story_task = _lead_story_prompt(lang, section_key, theme, heading, section_content, methodology_context)
+        section_content_storied = await tracker.run(provider, story_sys, story_task)
+        print(f"[Agent] Lead Storyteller (enrich) done: {len(section_content_storied)} chars")
+
         # 4. Peer Reviewer
-        peer_sys = SYSTEM_PROMPTS["peer_reviewer"][lang]
-        task = _peer_review_prompt(lang, theme, heading, research_plan, findings, section_content)
+        peer_sys = template_ctx + SYSTEM_PROMPTS["peer_reviewer"][lang]
+        task = _peer_review_prompt(lang, theme, heading, research_plan, findings, section_content_storied)
         peer_review = await tracker.run(provider, peer_sys, task)
         print(f"[Agent] Peer Reviewer done: {len(peer_review)} chars")
 
         # 5. Lead Researcher (revision)
-        research_revision_task = _researcher_revision_prompt(lang, theme, heading, research_plan, findings, section_content, peer_review, all_content)
+        research_revision_task = _researcher_revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, prev_titles)
         research_plan = await tracker.run(provider, researcher_sys, research_revision_task)
         print(f"[Agent] Lead Researcher (revised) done: {len(research_plan)} chars")
 
         # 6. Lead Writer (revision)
-        task = _revision_prompt(lang, theme, heading, research_plan, findings, section_content, peer_review, paper_list, all_content)
+        task = _revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, paper_list, prev_titles)
         section_content = await tracker.run(provider, writer_sys, task)
         print(f"[Agent] Lead Writer (revised) done: {len(section_content)} chars")
 
+        # 6b. Lead Storyteller (revision enrich)
+        story_task = _lead_story_prompt(lang, section_key, theme, heading, section_content, methodology_context)
+        section_content = await tracker.run(provider, story_sys, story_task)
+        print(f"[Agent] Lead Storyteller (revised enrich) done: {len(section_content)} chars")
+
         # 7. Humanizer
-        humanizer_sys = SYSTEM_PROMPTS["humanizer"][lang]
+        humanizer_sys = template_ctx + SYSTEM_PROMPTS["humanizer"][lang]
         task = _humanizer_prompt(lang, theme, heading, section_content)
         section_content = await tracker.run(provider, humanizer_sys, task)
         print(f"[Agent] Humanizer done: {len(section_content)} chars")
 
         all_content += "\n\n" + section_content
+        prev_titles += f"{heading}\n"
 
     return all_content, tracker.usage()

@@ -17,6 +17,8 @@ class ChunkStore:
         self.client = QdrantClient(":memory:")
         self.chunks: list[dict[str, Any]] = []
         self._built = False
+        self.paper_hash: str | None = None
+        self._generation_count = 0
 
         self._embed_model = None
         self._use_fastembed = False
@@ -52,6 +54,7 @@ class ChunkStore:
         self._vocab = None
         self._vectors = None
         self._built = False
+        self.paper_hash = None
 
     def __len__(self) -> int:
         return len(self.chunks)
@@ -197,7 +200,7 @@ class ChunkStore:
         else:
             self._build_tfidf()
 
-    def search(self, query: str, top_k: int = 5, min_score: float = 0.05) -> list[dict[str, Any]]:
+    def search(self, query: str, top_k: int = 10, min_score: float = 0.2) -> list[dict[str, Any]]:
         trigger_rebuild = (
             not self.chunks
             or (self._use_fastembed and not self._built)

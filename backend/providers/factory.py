@@ -1,6 +1,6 @@
 from typing import Optional
 from .base import LLMProvider
-from ..config import settings
+from config import settings
 
 
 _providers: dict[str, tuple[str, dict]] = {}

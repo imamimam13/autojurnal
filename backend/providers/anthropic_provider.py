@@ -1,7 +1,7 @@
 from typing import Optional
 from anthropic import AsyncAnthropic
 from .base import LLMProvider
-from ..config import settings
+from config import settings
 
 
 class AnthropicProvider(LLMProvider):

@@ -1,0 +1,19 @@
+{
+  "name": "Mathematics Research",
+  "type": "journal",
+  "category": "mathematics",
+  "sections": [
+    {"level": 2, "heading_id": "Judul", "heading_en": "Title"},
+    {"level": 2, "heading_id": "Abstrak", "heading_en": "Abstract"},
+    {"level": 2, "heading_id": "Pendahuluan", "heading_en": "Introduction"},
+    {"level": 2, "heading_id": "Preliminari", "heading_en": "Preliminaries"},
+    {"level": 2, "heading_id": "Hasil Utama", "heading_en": "Main Results"},
+    {"level": 2, "heading_id": "Kesimpulan", "heading_en": "Conclusion"},
+    {"level": 2, "heading_id": "Daftar Pustaka", "heading_en": "References"}
+  ],
+  "constraints": {
+    "abstrak_maks": 200,
+    "kata_kunci_maks": 5,
+    "citation_style": "AMS"
+  }
+}

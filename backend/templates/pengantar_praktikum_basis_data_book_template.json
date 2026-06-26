@@ -1,0 +1,44 @@
+{
+  "name": "Pengantar Praktikum Basis Data Book Template",
+  "type": "textbook",
+  "sections": [
+    {
+      "level": 2,
+      "heading_id": "KATA PENGANTAR",
+      "heading_en": "Preface"
+    },
+    {
+      "level": 2,
+      "heading_id": "DAFTAR ISI",
+      "heading_en": "Table of Contents"
+    },
+    {
+      "level": 2,
+      "heading_id": "BAB",
+      "heading_en": "Chapter"
+    },
+    {
+      "level": 2,
+      "heading_id": "DAFTAR PUSTAKA",
+      "heading_en": "References"
+    },
+    {
+      "level": 2,
+      "heading_id": "TENTANG PENULIS",
+      "heading_en": "About the Author"
+    }
+  ],
+  "constraints": {
+    "abstrak_maks": null,
+    "kata_kunci_maks": null,
+    "total_halaman_maks": null,
+    "citation_style": null
+  },
+  "chapter_subsections": [
+    {
+      "level": 3,
+      "heading_id": "Sub Judul",
+      "heading_en": "Sub-heading"
+    }
+  ]
+}

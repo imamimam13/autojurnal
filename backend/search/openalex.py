@@ -1,7 +1,7 @@
 import httpx
 from typing import Optional
 from dataclasses import dataclass, field
-from ..config import settings
+from config import settings
 
 
 @dataclass

@@ -1,7 +1,7 @@
 from typing import Optional
 from openai import AsyncOpenAI
 from .base import LLMProvider
-from ..config import settings
+from config import settings
 
 
 class OpenAIProvider(LLMProvider):

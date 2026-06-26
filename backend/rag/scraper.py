@@ -5,20 +5,25 @@ import fitz
 from .chunker import chunk_text
 
 
-async def scrape_pdf(pdf_url: str, timeout: int = 30) -> str | None:
-    try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            resp = await client.get(pdf_url)
-            resp.raise_for_status()
-        doc = fitz.open(stream=resp.content, filetype="pdf")
-        text = "".join(page.get_text() for page in doc)
-        doc.close()
-        return text.strip() or None
-    except Exception:
-        return None
+async def scrape_pdf(pdf_url: str, timeout: int = 60) -> str | None:
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                resp = await client.get(pdf_url)
+                resp.raise_for_status()
+            doc = fitx.open(stream=resp.content, filetype="pdf")
+            text = "".join(page.get_text() for page in doc)
+            doc.close()
+            return text.strip() or None
+        except Exception:
+            if attempt == 0:
+                await asyncio.sleep(2)
+                continue
+            return None
+    return None
 
 
-async def scrape_all(papers: list, max_concurrent: int = 5) -> dict[int, list[str]]:
+async def scrape_all(papers: list, max_concurrent: int = 10) -> dict[int, list[str]]:
     sem = asyncio.Semaphore(max_concurrent)
 
     async def _scrape_one(idx: int, url: str) -> tuple[int, str | None]:

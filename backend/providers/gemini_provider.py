@@ -2,7 +2,7 @@ from typing import Optional
 from google import genai
 from google.genai import types
 from .base import LLMProvider
-from ..config import settings
+from config import settings
 
 
 class GeminiProvider(LLMProvider):

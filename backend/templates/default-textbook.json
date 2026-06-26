@@ -1,0 +1,11 @@
+{
+  "name": "Standard Textbook",
+  "type": "textbook",
+  "category": "general",
+  "chapter_subsections": [
+    {"level": 3, "heading_id": "Tujuan Pembelajaran", "heading_en": "Learning Objectives"},
+    {"level": 3, "heading_id": "Uraian Materi", "heading_en": "Content"},
+    {"level": 3, "heading_id": "Rangkuman", "heading_en": "Summary"},
+    {"level": 3, "heading_id": "Latihan Soal", "heading_en": "Exercises"}
+  ]
+}

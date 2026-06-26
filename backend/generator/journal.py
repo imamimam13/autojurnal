@@ -1,5 +1,5 @@
 from typing import Optional
-from ..search.openalex import Paper
+from search.openalex import Paper
 
 
 BASE_TEMPLATE_EN = """Write an ORIGINAL qualitative research journal article on the given theme. The papers below are your REFERENCES — cite them as sources, but write EVERYTHING in your own original words and sentence structures.
@@ -18,6 +18,12 @@ IMPORTANT CITATION RULES:
 5. Use the EXACT URL from the reference list — do NOT modify or fabricate DOIs/URLs.
 6. Do NOT add volume, issue, pages, or other details not provided.
 7. Format: Author (Year). Title. Source. URL: {{URL from list}}
+
+DIAGRAMS & TABLES (ONLY if truly needed):
+- Use Markdown tables for comparative data or finding summaries.
+- Use Mermaid diagrams ONLY for essential flowcharts or conceptual frameworks.
+- Mermaid format: ```mermaid\ngraph TD\n    A[Concept] --> B[Sub-concept]\n```
+- Do NOT create diagrams unless they significantly improve clarity.
 
 LENGTH: {length_instruction}
 
@@ -192,6 +198,8 @@ def build_part_prompt(
     num_parts: int = 1,
     previous_content: Optional[str] = None,
     rag_context: Optional[str] = None,
+    has_data: bool = False,
+    user_data: Optional[str] = None,
 ) -> str:
     template = BASE_TEMPLATE_ID if language == "id" else BASE_TEMPLATE_EN
     sections = SECTIONS["id" if language == "id" else "en"]
@@ -234,6 +242,18 @@ def build_part_prompt(
                 "---\n"
             )
 
+    from diagrams.prompts import diagram_instruction
+
+    no_ref = (
+        "\n\nPENTING: HANYA gunakan sitasi inline (Penulis, Tahun). "
+        "JANGAN pernah mencantumkan judul jurnal, volume, nomor, halaman, DOI, atau URL di badan artikel. "
+        "Referensi lengkap hanya di bagian Daftar Pustaka."
+        if language == "id"
+        else "\n\nIMPORTANT: Only use inline citations (Author, Year). "
+        "NEVER include journal name, volume, issue, pages, DOI, or URLs in the article body. "
+        "Full references belong only in the References section."
+    )
+
     # Only include paper list in part 1 to save tokens
     if part == 1:
         paper_list = build_paper_list(papers)
@@ -242,6 +262,8 @@ def build_part_prompt(
             + rag_block
             + f'\n{theme_label}: "{theme}"\n\n'
             + section_info["instruction"]
+            + diagram_instruction(has_data, language, user_data)
+            + no_ref
             + "\n\nOutput ONLY the sections listed above. Nothing else."
         )
     else:
@@ -251,6 +273,8 @@ def build_part_prompt(
             f"ALREADY WRITTEN (previous parts of the journal):\n\n{previous_content}\n\n"
             f"---\n\n"
             + section_info["instruction"]
+            + diagram_instruction(has_data, language, user_data)
+            + no_ref
             + "\n\nContinue from where the previous part left off. Do NOT repeat sections already written. Output ONLY the new sections."
         )
 

@@ -1,0 +1,13 @@
+{
+  "name": "Standard Journal",
+  "type": "journal",
+  "category": "general",
+  "sections": [
+    {"level": 2, "heading_id": "Judul\\n## Abstrak", "heading_en": "Title\\n## Abstract"},
+    {"level": 2, "heading_id": "Pendahuluan", "heading_en": "Introduction"},
+    {"level": 2, "heading_id": "Tinjauan Pustaka", "heading_en": "Literature Review"},
+    {"level": 2, "heading_id": "Metode Penelitian", "heading_en": "Research Method"},
+    {"level": 2, "heading_id": "Temuan dan Pembahasan", "heading_en": "Findings and Discussion"},
+    {"level": 2, "heading_id": "Penutup", "heading_en": "Conclusion"}
+  ]
+}

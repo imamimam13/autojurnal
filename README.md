@@ -1,80 +1,100 @@
 # AutoJurnal
 
-AI-powered qualitative research journal generator with multi-agent orchestration, RAG-based source grounding, and programmatic reference management.
+AI-powered academic journal and textbook generator with multi-agent orchestration, RAG-based source grounding, web research, diagram generation, and chunked processing.
 
 ## Features
 
-- **Multi-Agent Architecture** — 7 agents per section collaborate in a pipeline: Lead Researcher → Source Reviewer → Lead Writer → Peer Reviewer → Researcher Revision → Writer Revision → Humanizer
-- **RAG (Retrieval-Augmented Generation)** — PDF scraping, chunking, and semantic search using TF-IDF or FastEmbed
-- **Multi-Provider** — Supports Ollama, Google Gemini, OpenAI, and Anthropic
-- **Programmatic Daftar Pustaka** — References generated from real OpenAlex data, never from the LLM
-- **Multi-Language** — Supports Indonesian (akademik) and English
-- **Auto API Key Save** — Keys entered in the frontend persist to `.env`
+- **Multi-Agent Architecture** — 10 agents per section: Methodology Analyst → Lead Researcher → Source Reviewer → Lead Writer → **Lead Storyteller** → Peer Reviewer → Researcher Revision → Writer Revision → Storyteller Revision → Humanizer
+- **Web Research** — Bing Web + Bing News + Google Scholar via httpx (no browser binary needed)
+- **RAG (Retrieval-Augmented Generation)** — PDF scraping, chunking, and semantic search via Qdrant in-memory + TF-IDF (or FastEmbed)
+- **Diagrams** — Matplotlib (bar/line/pie/venn/gantt) + Mermaid (flowchart/concept_map, rendered via CDN — no `dot` binary required)
+- **Multi-Provider** — Ollama, Google Gemini, OpenAI, Anthropic
+- **Templates** — 10 preset templates (IMRAD, Systematic Review, Case Report, Lab Reports, etc.) with category grouping + user-uploaded templates
+- **Restructure** — Heading detection, Google Docs/Drive download, chunked LLM restructure
+- **Human Review** — `.docx` comment extraction, Google Docs link parsing, chunked revision
+- **Translate** — Chunked translation preserving markdown, citations, and diagram blocks
+- **Textbook Mode** — Curriculum designer + per-chapter generation with RAG
+- **Programmatic References** — Real OpenAlex paper data, never from LLM
+- **Multi-Language** — Indonesian and English
 
 ## Architecture
 
 ```
-User → Frontend → FastAPI Backend
-                    │
-                    ├── Search (OpenAlex API)
-                    ├── RAG (PyMuPDF → Chunker → Qdrant)
-                    │
-                    └── Generate
-                        ├── Standard mode (2-3 parts, single prompt)
-                        └── Multi-Agent mode (7 agents × 6 sections)
+User → Frontend (vanilla HTML + Bootstrap + JS)
+              │
+              └── FastAPI Backend
+                      │
+                      ├── Search (OpenAlex API)
+                      ├── Research (Bing Web, News, Google Scholar)
+                      ├── RAG (PyMuPDF → Chunker → Qdrant/TF-IDF)
+                      │
+                      ├── Generate
+                      │   ├── Standard mode (single prompt)
+                      │   ├── Multi-Agent mode (10 agents × section)
+                      │   └── Textbook mode (curriculum + chapters)
+                      │
+                      ├── Restructure (heading detection + LLM)
+                      ├── Review (chunked revision + docx parse)
+                      └── Translate (chunked, structure-preserving)
 ```
 
-### Multi-Agent Pipeline
+### Multi-Agent Pipeline (Journal)
 
 Each section (Judul/Abstrak, Pendahuluan, Tinjauan Pustaka, Metode, Temuan, Penutup) passes through:
 
 ```
-1. Lead Researcher      → Research plan
-2. Source Reviewer      → Synthesized findings from RAG
-3. Lead Writer          → First draft
-4. Peer Reviewer        → Critique (6 aspects)
-5. Lead Researcher      → Revised plan
-6. Lead Writer          → Revised section
-7. Humanizer            → Natural language polish
+0. Methodology Analyst    → Determine paradigm + analysis method (runs once)
+1. Lead Researcher        → Research plan
+2. Source Reviewer         → Synthesized findings from RAG
+3. Lead Writer             → First draft
+4. Lead Storyteller        → Narrative/descriptive enrichment
+5. Peer Reviewer           → Critique (6 aspects)
+6. Lead Researcher         → Revised plan
+7. Lead Writer             → Revised draft
+8. Lead Storyteller        → Enrich revision
+9. Humanizer               → Natural language polish
 ```
 
-### Embedding Backend
+### Textbook Pipeline
 
-Auto-detects the best available option:
-
-| Platform | Embedding | Requirement |
-|----------|-----------|-------------|
-| Linux x86_64 | FastEmbed (ONNX) | `pip install fastembed` |
-| macOS 14+ arm64 | FastEmbed (ONNX) | `pip install fastembed` |
-| Windows | FastEmbed (ONNX) | `pip install fastembed` |
-| Intel Mac / macOS <14 | TF-IDF (numpy) | Works out of the box |
+```
+0. Methodology Analyst     → Determine methodology (runs once)
+1. Curriculum Designer     → Generate chapter list
+   (per chapter:)
+2. Lead Researcher         → Chapter plan
+3. Source Reviewer          → Extract concepts
+4. Lead Writer              → Write chapter
+5. Lead Storyteller         → Enrich with illustrations/analogies
+6. Humanizer                → Natural language polish
+```
 
 ## Prerequisites
 
 - **Python 3.11+** (3.14 recommended)
-- A running Ollama server (for Ollama provider) or API keys for cloud providers
+- **Ollama** (recommended) or API keys for cloud providers
+- **Docker** (optional, for running Qdrant server — not needed for in-memory mode)
 
 ## Installation
 
 ```bash
-# Clone
-git clone https://github.com/yourusername/autojurnal.git
+git clone https://github.com/imamimam13/autojurnal.git
 cd autojurnal
 
-# Create virtual environment
 python3 -m venv venv
-source venv/bin/activate  # Linux/macOS
+source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (matplotlib needs font cache set)
+MPLCONFIGDIR=/tmp/matplotlib pip install -r backend/requirements.txt
+
+# Install matplotlib separately if needed
+MPLCONFIGDIR=/tmp/matplotlib pip install matplotlib matplotlib-venn
 ```
 
-> **Note:** `fastembed` requires `onnxruntime`, which may not have a wheel for your platform.
-> If installation fails, the app falls back to TF-IDF automatically — no manual intervention needed.
+> **Note:** `fastembed` requires `onnxruntime`. If installation fails, the app falls back to TF-IDF automatically. Qdrant in-memory mode uses `qdrant-client<1.13` for Python 3.14 compatibility.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in your credentials:
+Copy `.env.example` to `.env` and fill in credentials:
 
 ```env
 # OpenAlex (optional, for higher rate limits)
@@ -82,7 +102,7 @@ OPENALEX_API_KEY=your_key_here
 
 # Ollama
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3
+OLLAMA_MODEL=gemma3:12b
 
 # OpenAI
 OPENAI_API_KEY=sk-...
@@ -97,60 +117,114 @@ GEMINI_API_KEY=AIza...
 GEMINI_MODEL=gemini-2.0-flash
 ```
 
-API keys can also be entered in the frontend — they are automatically saved to `.env` when the provider is changed.
-
 ## Usage
 
 ```bash
+# Start Ollama (Docker)
+docker start ollama  # or: docker run -d --name ollama -p 11434:11434 ollama/ollama
+
+# Pull a model
+docker exec ollama ollama pull gemma3:12b
+
 # Start the server
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+cd /Users/imamimam/Documents/GitHub/autojurnal
+MPLCONFIGDIR=/tmp/matplotlib venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Open `http://localhost:8000` in your browser.
 
-1. **Search** — Enter a research theme, adjust year range, click Search
-2. **Select** — Choose papers from the results
-3. **Generate** — Select provider, toggle Multi-Agent, click Generate
+1. **Search** — Enter theme, adjust year range, click Search
+2. **Select** — Choose papers from OpenAlex results
+3. **(Optional) Research** — Check "🔍 Research" to fetch live web sources
+4. **Generate** — Select provider, template, toggle Multi-Agent, click Generate
 
-### Standard Mode
+### Modes
 
-Generates the journal in 2-3 parts (depending on target length). Each part uses a single LLM call.
+| Mode | Description | LLM Calls |
+|------|-------------|-----------|
+| **Standard** | Single prompt, 2-3 parts | ~3 |
+| **Multi-Agent** | 10 agent steps × 6 sections | ~55 + 1 methodology |
+| **Textbook** | Curriculum + 10 chapters | ~60 + 1 methodology |
 
-### Multi-Agent Mode
+### Other Features
 
-Each of the 6 journal sections goes through 7 agent steps (42 LLM calls total).
-Produces higher quality output with peer review and humanization.
+- **Restructure** — Paste document text or Google Docs link, select template → AI restructures content with proper headings
+- **Review** — Upload `.docx` with Word comments or paste Google Docs link → chunked revision based on feedback
+- **Translate** — Paste text, select source/target language → chunked translation preserving structure
+- **Templates** — Browse preset templates by category, upload guideline PDFs to create custom templates
+- **Diagrams** — Toggle "📊 Has Data" to enable data-driven charts; flowchart/concept_map work without data
 
 ## Project Structure
 
 ```
 autojurnal/
 ├── backend/
-│   ├── main.py                 # FastAPI app & endpoints
-│   ├── config.py               # Pydantic settings
-│   ├── search/
-│   │   └── openalex.py         # OpenAlex paper search
+│   ├── main.py                    # FastAPI app & all endpoints
+│   ├── config.py                  # Pydantic settings from .env
+│   │
 │   ├── generator/
-│   │   ├── journal.py          # Standard generation logic
-│   │   └── agents.py           # Multi-agent pipeline
+│   │   ├── agents.py              # Multi-agent pipeline (10 agents)
+│   │   ├── journal.py             # Standard journal generation
+│   │   └── textbook.py            # Textbook generation
+│   │
 │   ├── providers/
-│   │   ├── base.py             # LLMProvider interface
-│   │   ├── factory.py          # Provider registry
-│   │   ├── ollama.py
+│   │   ├── base.py                # LLMProvider abstract interface
+│   │   ├── factory.py             # Provider registry + discovery
+│   │   ├── ollama.py              # Ollama provider (num_predict=8192, retry)
 │   │   ├── openai_provider.py
 │   │   ├── anthropic_provider.py
 │   │   └── gemini_provider.py
-│   └── rag/
-│       ├── scraper.py          # PyMuPDF async PDF scraping
-│       ├── chunker.py          # Text chunking (1500/50)
-│       └── store.py            # Qdrant in-memory + TF-IDF / FastEmbed
+│   │
+│   ├── research/
+│   │   ├── searcher.py            # Bing Web + News + Google Scholar (httpx, Safari UA)
+│   │   ├── scraper.py             # Text extraction (httpx fallback)
+│   │   ├── pipeline.py            # Background research jobs
+│   │   ├── models.py              # ScrapedSource, ResearchJob
+│   │   └── router.py              # /api/research endpoints
+│   │
+│   ├── rag/
+│   │   ├── scraper.py             # Async PDF scraping (PyMuPDF)
+│   │   ├── chunker.py             # Text chunking (1000/200, safe infinite loop)
+│   │   └── store.py               # Qdrant in-memory + TF-IDF fallback
+│   │
+│   ├── diagrams/
+│   │   ├── engine.py              # 7 render types: bar, line, pie, venn, gantt, flowchart, concept_map
+│   │   └── prompts.py             # Diagram instruction builder (has_data-aware)
+│   │
+│   ├── restructure/
+│   │   ├── parser.py              # Heading detection from text
+│   │   ├── gdrive.py              # Google Docs download (HTML → markdown headings)
+│   │   └── restructure.py         # Chunked LLM restructure
+│   │
+│   ├── templates/
+│   │   ├── loader.py              # Template load/save/list/delete/parse
+│   │   └── *.json                 # 10 preset templates (medical, physics, chemistry, math, etc.)
+│   │
+│   ├── search/
+│   │   └── openalex.py            # OpenAlex paper search API
+│   │
+│   └── requirements.txt           # Python dependencies
+│
 ├── frontend/
-│   ├── index.html
-│   ├── app.js
-│   └── style.css
-├── requirements.txt
+│   ├── index.html                 # Single-page app (Bootstrap 5.3.3)
+│   ├── app.js                     # All UI logic + API calls
+│   └── style.css                  # Custom styles
+│
+├── .env.example
 └── README.md
 ```
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| `QdrantClient(":memory:")` hangs | Pin `qdrant-client<1.13` (incompatible with Python 3.14) |
+| `grpc.aio` import hangs | Downgrade qdrant-client to <1.13 (avoids grpc.aio issue) |
+| Ollama 504 / timeout | Chunked processing (3000 chars) + `num_predict=8192` + 3× retry |
+| Bing captcha | Uses Safari UA only (no Accept/Accept-Language headers) |
+| Matplotlib font cache | Set `MPLCONFIGDIR=/tmp/matplotlib` before running |
+| CloakBrowser binary | Not needed — research uses httpx-only by default |
+| Flowchart not rendering | No `dot` binary needed — uses frontend mermaid.js CDN |
 
 ## License
 

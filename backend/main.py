@@ -28,14 +28,13 @@ from templates import load_template, list_templates, save_template, delete_templ
 from restructure.parser import split_sections
 from docx import Document as DocxDocument
 from restructure import parse_document, restructure_document as restructure_doc, resolve_link, render_diagrams
-from store.works import WorksStore, WorkRecord, format_previous_works_context
+from store import store as works_store
+from store.works import WorkRecord, format_previous_works_context
 from diagrams import extract_and_render_diagrams
 from research import research_router
 
 app = FastAPI(title=settings.app_name, version="1.0.0")
 app.include_router(research_router)
-
-works_store = WorksStore()
 
 
 def format_reference(p: Paper) -> str:

@@ -264,23 +264,24 @@ class WorksStore:
 def format_previous_works_context(works: list[WorkRecord]) -> str:
     if not works:
         return ""
-    parts = []
-    for w in works:
-        preview = w.content[:300].replace("\n", " ").strip()
-        parts.append(
-            f"- **Tema**: {w.theme} ({w.language}, {w.mode}, {w.created_at[:10]})\n"
-            f"  **Cuplikan**: {preview}..."
+    themes = "\n".join(f"  • {w.theme} ({w.mode}, {w.language}, {w.created_at[:10]})" for w in works)
+    if works[0].language == "id":
+        return (
+            "⚠️ INSTRUKSI ORISINALITAS:\n"
+            "Anda pernah menulis karya dengan tema serupa berikut:\n"
+            f"{themes}\n\n"
+            "PASTIKAN karya BARU ini BERBEDA SIGNIFIKAN — jangan ulang struktur, "
+            "contoh, kalimat, atau argumen yang sama. Anggap ini sebagai proyek "
+            "baru yang sepenuhnya terpisah.\n"
         )
-    header = (
-        "KARYA SEBELUMNYA DENGAN TEMA SERUPA:\n"
-        "Berikut adalah karya yang pernah Anda tulis dengan tema serupa. "
-        "PASTIKAN karya baru ini BERBEDA SIGNIFIKAN — jangan mengulang struktur, contoh, atau kalimat yang sama:\n\n"
-    ) if works[0].language == "id" else (
-        "PREVIOUS WORKS ON SIMILAR THEMES:\n"
-        "Below are works you have previously written on similar themes. "
-        "ENSURE the new work is SIGNIFICANTLY DIFFERENT — do not repeat the same structure, examples, or sentences:\n\n"
+    return (
+        "⚠️ ORIGINALITY INSTRUCTION:\n"
+        "You have previously written works on similar themes:\n"
+        f"{themes}\n\n"
+        "ENSURE the NEW work is SIGNIFICANTLY DIFFERENT — do not repeat the same "
+        "structure, examples, sentences, or arguments. Treat this as a completely "
+        "new, separate project.\n"
     )
-    return header + "\n".join(parts)
 
 
 # Shared singleton

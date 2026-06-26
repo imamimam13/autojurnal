@@ -230,6 +230,20 @@ SYSTEM_PROMPTS = {
             "that remains academic and professional."
         ),
     },
+    "lead_layouter": {
+        "id": (
+            "Anda adalah Lead Layouter yang ahli dalam visualisasi data akademik. "
+            "Tugas Anda adalah menambahkan diagram, grafik, tabel, dan elemen visual "
+            "ke dalam naskah jurnal untuk meningkatkan kejelasan dan dampak komunikasi. "
+            "Anda memahami kapan dan bagaimana menggunakan berbagai jenis visual."
+        ),
+        "en": (
+            "You are a Lead Layouter specialized in academic data visualization. "
+            "Your role is to add diagrams, charts, tables, and visual elements "
+            "to journal manuscripts to improve clarity and communication impact. "
+            "You understand when and how to use different types of visuals."
+        ),
+    },
     "humanizer": {
         "id": (
             "Anda adalah Humanizer yang ahli dalam membuat teks akademik terdengar "
@@ -874,6 +888,84 @@ Guidelines:
 8. **Output ONLY** the enriched text, no extra commentary."""
 
 
+def _lead_layout_prompt(
+    language: str, section_key: str, theme: str,
+    section_heading: str, section_content: str,
+    has_data: bool, user_data: Optional[str] = None,
+) -> str:
+    if language == "id":
+        return f"""Tema: "{theme}"
+Bagian: {section_heading}
+
+NASKAH:
+{section_content}
+
+---
+Tugas Anda sebagai Lead Layouter:
+
+Tambahkan elemen visual ke naskah di atas untuk meningkatkan kejelasan. Anda dapat menyisipkan:
+
+1. **Diagram Grafik** (hanya jika ada data numerik):
+   Format: ---DIAGRAM---
+   {{"type": "bar", "title": "...", "labels": [...], "values": [...]}}
+   ---END DIAGRAM---
+   Tipe: bar, line, pie, gantt
+
+2. **Diagram Alir / Peta Konsep** (untuk proses, hubungan, hierarki):
+   Format: ---DIAGRAM---
+   {{"type": "flowchart", "title": "...", "nodes": [{{"id": "A", "label": "..."}}, ...], "edges": [{{"from": "A", "to": "B", "label": "..."}}]}}
+   ---END DIAGRAM---
+   Tipe: flowchart, concept_map
+
+3. **Tabel Markdown** untuk data tabular.
+
+4. **Diagram Venn** untuk perbandingan tumpang tindih:
+   ---DIAGRAM---
+   {{"type": "venn", "title": "...", "sets": {{"A": [...], "B": [...]}}, "intersections": {{"A_B": [...]}}}}
+   ---END DIAGRAM---
+
+Aturan:
+- HANYA tambah visual jika benar-benar meningkatkan pemahaman.
+- Gunakan DATA ASLI dari naskah — JANGAN buat data palsu.
+- Jangan hapus atau ubah teks yang sudah ada — hanya SELIPKAN blok diagram/tabel.
+- Outputkan SELURUH naskah (teks + visual yang disisipkan), tanpa komentar tambahan."""
+    return f"""Theme: "{theme}"
+Section: {section_heading}
+
+TEXT:
+{section_content}
+
+---
+Your task as Lead Layouter:
+
+Add visual elements to the text above to improve clarity. You may insert:
+
+1. **Data Charts** (only if numeric data is present):
+   Format: ---DIAGRAM---
+   {{"type": "bar", "title": "...", "labels": [...], "values": [...]}}
+   ---END DIAGRAM---
+   Types: bar, line, pie, gantt
+
+2. **Flowcharts / Concept Maps** (for processes, relationships, hierarchies):
+   Format: ---DIAGRAM---
+   {{"type": "flowchart", "title": "...", "nodes": [{{"id": "A", "label": "..."}}, ...], "edges": [{{"from": "A", "to": "B", "label": "..."}}]}}
+   ---END DIAGRAM---
+   Types: flowchart, concept_map
+
+3. **Markdown Tables** for tabular data.
+
+4. **Venn Diagrams** for overlapping comparisons:
+   ---DIAGRAM---
+   {{"type": "venn", "title": "...", "sets": {{"A": [...], "B": [...]}}, "intersections": {{"A_B": [...]}}}}
+   ---END DIAGRAM---
+
+Rules:
+- ONLY add visuals when they truly improve understanding.
+- Use REAL data from the text — do NOT fabricate.
+- Do NOT delete or alter existing text — only INSERT diagram/table blocks.
+- Output the ENTIRE text (with inserted visuals), no extra commentary."""
+
+
 # ---- Orchestration ----
 
 async def generate_multi_agent(
@@ -996,7 +1088,14 @@ async def generate_multi_agent(
         section_content = await tracker.run(provider, story_sys, story_task)
         await log("Lead Storyteller", "Pengayaan revisi selesai")
 
-        # 7. Humanizer
+        # 7. Lead Layouter (insert diagrams, charts, tables)
+        await log("Lead Layouter", "Menambahkan elemen visual...")
+        layouter_sys = template_ctx + SYSTEM_PROMPTS["lead_layouter"][lang]
+        layout_task = _lead_layout_prompt(lang, section_key, theme, heading, section_content, has_data, user_data)
+        section_content = await tracker.run(provider, layouter_sys, layout_task)
+        await log("Lead Layouter", f"Visual selesai ({len(section_content)} chars)")
+
+        # 8. Humanizer
         await log("Humanizer", "Menghumanisasi naskah...")
         humanizer_sys = template_ctx + SYSTEM_PROMPTS["humanizer"][lang]
         task = _humanizer_prompt(lang, theme, heading, section_content)

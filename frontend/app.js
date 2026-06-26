@@ -738,29 +738,59 @@ function _cleanHtmlClipboard(html) {
         .replace(/<div class="mermaid">[\s\S]*?<\/div>/gi, "");
 }
 
+function _copyFallback(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand("copy");
+        showToast("Copied!");
+    } catch {
+        showToast("Copy failed — select manually", "danger");
+    }
+    document.body.removeChild(ta);
+}
+
+function _clipboardWrite(htmlContent, plainText, successMsg = "Copied!") {
+    if (navigator.clipboard && navigator.clipboard.write) {
+        try {
+            const cleanHtml = `<html><body>${_cleanHtmlClipboard(htmlContent)}</body></html>`;
+            navigator.clipboard.write([
+                new ClipboardItem({
+                    "text/html": new Blob([cleanHtml], { type: "text/html" }),
+                    "text/plain": new Blob([plainText], { type: "text/plain" }),
+                }),
+            ]).then(() => showToast(successMsg)).catch(() => {
+                navigator.clipboard.writeText(plainText).then(
+                    () => showToast(successMsg)
+                ).catch(() => _copyFallback(plainText));
+            });
+        } catch {
+            _copyFallback(plainText);
+        }
+    } else {
+        _copyFallback(plainText);
+    }
+}
+
 function copyJournal() {
     const rawHtml = renderMarkdown(currentJournal);
-    const cleanHtml = `<html><body>${_cleanHtmlClipboard(rawHtml)}</body></html>`;
-    const plainText = currentJournal.trim();
-
-    navigator.clipboard.write([
-        new ClipboardItem({
-            "text/html": new Blob([cleanHtml], { type: "text/html" }),
-            "text/plain": new Blob([plainText], { type: "text/plain" }),
-        }),
-    ]).then(() => showToast("Copied!")).catch(() => {
-        // fallback jika ClipboardItem tidak didukung
-        navigator.clipboard.writeText(plainText).then(() => {
-            showToast("Copied as markdown!");
-        });
-    });
+    _clipboardWrite(rawHtml, currentJournal.trim());
 }
 
 function copyPlainText() {
     const plainText = stripMarkdown(currentJournal);
-    navigator.clipboard.writeText(plainText).then(() => {
-        showToast("Plain text copied!");
-    });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(plainText).then(() => {
+            showToast("Plain text copied!");
+        }).catch(() => _copyFallback(plainText));
+    } else {
+        _copyFallback(plainText);
+    }
 }
 
 function downloadJournal() {
@@ -1249,17 +1279,7 @@ function copyRestructured() {
     const el = document.getElementById("restructured-content");
     const rawMarkdown = el.dataset.raw || el.textContent || "";
     const rawHtml = renderMarkdown(rawMarkdown);
-    const cleanHtml = `<html><body>${_cleanHtmlClipboard(rawHtml)}</body></html>`;
-    const plainText = rawMarkdown.trim();
-
-    navigator.clipboard.write([
-        new ClipboardItem({
-            "text/html": new Blob([cleanHtml], { type: "text/html" }),
-            "text/plain": new Blob([plainText], { type: "text/plain" }),
-        }),
-    ]).then(() => showToast("Copied!")).catch(() => {
-        navigator.clipboard.writeText(plainText).then(() => showToast("Copied as markdown!"));
-    });
+    _clipboardWrite(rawHtml, rawMarkdown.trim());
 }
 
 function downloadRestructured() {
@@ -1392,17 +1412,7 @@ function copyReviewResult() {
     const el = document.getElementById("review-content");
     const rawMarkdown = el.dataset.raw || el.textContent || "";
     const rawHtml = renderMarkdown(rawMarkdown);
-    const cleanHtml = `<html><body>${_cleanHtmlClipboard(rawHtml)}</body></html>`;
-    const plainText = rawMarkdown.trim();
-
-    navigator.clipboard.write([
-        new ClipboardItem({
-            "text/html": new Blob([cleanHtml], { type: "text/html" }),
-            "text/plain": new Blob([plainText], { type: "text/plain" }),
-        }),
-    ]).then(() => showToast("Copied!")).catch(() => {
-        navigator.clipboard.writeText(plainText).then(() => showToast("Copied as markdown!"));
-    });
+    _clipboardWrite(rawHtml, rawMarkdown.trim());
 }
 
 function downloadReviewResult() {
@@ -1481,14 +1491,7 @@ function copyTranslated() {
     const cleanHtml = `<html><body>${_cleanHtmlClipboard(rawHtml)}</body></html>`;
     const plainText = rawMarkdown.trim();
 
-    navigator.clipboard.write([
-        new ClipboardItem({
-            "text/html": new Blob([cleanHtml], { type: "text/html" }),
-            "text/plain": new Blob([plainText], { type: "text/plain" }),
-        }),
-    ]).then(() => showToast("Copied!")).catch(() => {
-        navigator.clipboard.writeText(plainText).then(() => showToast("Copied as markdown!"));
-    });
+    _clipboardWrite(rawHtml, rawMarkdown.trim());
 }
 
 function downloadTranslated() {

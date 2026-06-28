@@ -732,10 +732,21 @@ async def _run_generation(
             journal = "\n\n".join(journal_parts)
             token_usage = None
 
-        journal = extract_and_render_diagrams(journal)
+        import time
+        t = time.time()
+        print("[PostProcess] Rendering diagrams (matplotlib)...")
+        journal = await asyncio.get_event_loop().run_in_executor(
+            None, extract_and_render_diagrams, journal
+        )
+        print(f"[PostProcess] matplotlib diagrams done ({time.time()-t:.1f}s)")
+        t = time.time()
+        print("[PostProcess] Rendering mermaid...")
         journal = await render_diagrams(journal)
+        print(f"[PostProcess] mermaid done ({time.time()-t:.1f}s)")
         journal = replace_references(journal, papers, language)
         journal = _strip_inline_references(journal)
+
+        print("[PostProcess] Sending result to frontend...")
 
         # Save to library if enabled
         if do_library:

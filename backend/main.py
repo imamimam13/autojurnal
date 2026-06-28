@@ -11,20 +11,7 @@ import re
 import tempfile
 from pathlib import Path
 
-# Ensure matplotlib uses a consistent cache dir to avoid "building font cache" delay
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib_cache")
 os.environ.setdefault("MPLBACKEND", "Agg")
-Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
-
-# Pre-build matplotlib font cache synchronously at import time
-try:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import matplotlib.font_manager
-    print(f"[Matplotlib] Font cache ready at {os.environ['MPLCONFIGDIR']}")
-except Exception:
-    pass
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse

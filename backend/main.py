@@ -732,15 +732,32 @@ async def _run_generation(
 
         import time
         t = time.time()
-        print("[PostProcess] Rendering diagrams (matplotlib)...")
-        journal = await asyncio.get_event_loop().run_in_executor(
-            None, extract_and_render_diagrams, journal
-        )
-        print(f"[PostProcess] matplotlib diagrams done ({time.time()-t:.1f}s)")
-        t = time.time()
+
+        # Skip matplotlib entirely if no diagram blocks
+        if "---DIAGRAM---" not in journal:
+            print("[PostProcess] No diagram blocks, skipping matplotlib")
+        else:
+            print("[PostProcess] Rendering diagrams (matplotlib)...")
+            try:
+                # Run in thread pool with 60s timeout to avoid hanging
+                loop = asyncio.get_event_loop()
+                journal = await asyncio.wait_for(
+                    loop.run_in_executor(None, extract_and_render_diagrams, journal),
+                    timeout=60,
+                )
+                print(f"[PostProcess] matplotlib diagrams done ({time.time()-t:.1f}s)")
+            except asyncio.TimeoutError:
+                print("[PostProcess] matplotlib timed out (60s) — skipping diagram rendering")
+                # Remove raw diagram blocks from output
+                journal = re.sub(
+                    r"---DIAGRAM---\s*\n.*?---END DIAGRAM---\s*\n?",
+                    "", journal, flags=re.DOTALL
+                )
+
+        t2 = time.time()
         print("[PostProcess] Rendering mermaid...")
         journal = await render_diagrams(journal)
-        print(f"[PostProcess] mermaid done ({time.time()-t:.1f}s)")
+        print(f"[PostProcess] mermaid done ({time.time()-t2:.1f}s)")
         journal = replace_references(journal, papers, language)
         journal = _strip_inline_references(journal)
 

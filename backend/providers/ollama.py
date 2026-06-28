@@ -11,6 +11,7 @@ class OllamaProvider(LLMProvider):
         base = base_url or settings.ollama_base_url
         self.base_url = base.rstrip("/")
         self.api_key = api_key or settings.ollama_api_key
+        print(f"[Ollama] Initialized with base_url={self.base_url!r}, model={self.model!r}, api_key={'***' if self.api_key else None}")
 
     @property
     def name(self) -> str:
@@ -32,6 +33,8 @@ class OllamaProvider(LLMProvider):
             "stream": False,
         }
         retries = 3
+        url = f"{self.base_url}/api/generate"
+        print(f"[Ollama] POST {url}  model={self.model!r}")
         async with httpx.AsyncClient(timeout=120) as client:
             for attempt in range(retries):
                 try:

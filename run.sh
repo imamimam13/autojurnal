@@ -19,4 +19,7 @@ echo "Starting backend at http://localhost:8000"
 echo "Open frontend at file://$(pwd)/frontend/index.html"
 echo ""
 
+export MPLCONFIGDIR="$HOME/.matplotlib"
+mkdir -p "$MPLCONFIGDIR"
+
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000

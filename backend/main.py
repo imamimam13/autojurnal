@@ -9,6 +9,11 @@ from typing import Optional, AsyncGenerator
 import os
 import re
 import tempfile
+from pathlib import Path
+
+# Ensure matplotlib uses a consistent cache dir to avoid "building font cache" delay
+os.environ.setdefault("MPLCONFIGDIR", str(Path.home() / ".matplotlib"))
+Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -35,6 +40,22 @@ from research import research_router
 
 app = FastAPI(title=settings.app_name, version="1.0.0")
 app.include_router(research_router)
+
+
+@app.on_event("startup")
+async def prebuild_matplotlib_font_cache():
+    """Pre-build matplotlib font cache on startup so it doesn't delay diagram rendering."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots()
+        ax.plot([1, 2, 3], [1, 4, 9])
+        fig.savefig("/dev/null", format="svg")
+        plt.close(fig)
+        print("[Matplotlib] Font cache built on startup")
+    except Exception as e:
+        print(f"[Matplotlib] Font cache prebuild skipped: {e}")
 
 
 def format_reference(p: Paper) -> str:

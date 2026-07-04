@@ -4,6 +4,11 @@ import base64
 import re
 from typing import Optional
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
 DIAGRAM_RE = re.compile(
     r"---DIAGRAM---\s*\n(.*?)---END DIAGRAM---",
     re.DOTALL,
@@ -13,6 +18,8 @@ CONCEPTUAL_TYPES = {"flowchart", "concept_map"}
 
 
 def _mpl_render(fig) -> Optional[bytes]:
+    if fig is None:
+        return None
     buf = io.BytesIO()
     try:
         fig.savefig(buf, format="svg", bbox_inches="tight", dpi=120)
@@ -22,7 +29,6 @@ def _mpl_render(fig) -> Optional[bytes]:
         print(f"[Diagram] matplotlib render failed: {e}")
         return None
     finally:
-        import matplotlib.pyplot as plt
         plt.close(fig)
 
 
@@ -148,10 +154,6 @@ def _render_concept_map(data: dict) -> Optional[str]:
 # --- Bar Chart ---
 
 def _render_bar(data: dict) -> Optional[str]:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
     title = data.get("title", "Bar Chart")
     labels = data.get("labels", [])
     values = data.get("values", [])
@@ -178,9 +180,6 @@ def _render_bar(data: dict) -> Optional[str]:
 # --- Line Chart ---
 
 def _render_line(data: dict) -> Optional[str]:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     title = data.get("title", "Line Chart")
     labels = data.get("labels", [])
     datasets = data.get("datasets", [])
@@ -217,9 +216,6 @@ def _render_line(data: dict) -> Optional[str]:
 # --- Pie Chart ---
 
 def _render_pie(data: dict) -> Optional[str]:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     title = data.get("title", "Pie Chart")
     labels = data.get("labels", [])
     values = data.get("values", [])
@@ -243,9 +239,6 @@ def _render_pie(data: dict) -> Optional[str]:
 # --- Venn Diagram ---
 
 def _render_venn(data: dict) -> Optional[str]:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     from matplotlib_venn import venn2, venn3
     title = data.get("title", "Venn Diagram")
     sets = data.get("sets", [])
@@ -286,10 +279,6 @@ def _render_venn(data: dict) -> Optional[str]:
 # --- Gantt Chart ---
 
 def _render_gantt(data: dict) -> Optional[str]:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
     title = data.get("title", "Timeline")
     tasks = data.get("tasks", [])
     if not tasks:
@@ -332,15 +321,41 @@ def extract_and_render_diagrams(markdown_text: str) -> str:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as e:
-            print(f"[Diagram] JSON parse error: {e}")
-            return f"*[Diagram: invalid JSON]*"
+            msg = f"[Diagram] JSON parse error: {e}"
+            print(msg)
+            return f"*[Diagram: invalid JSON — {e}]*"
         dtype = data.get("type", "")
         renderer = RENDERERS.get(dtype)
         if not renderer:
             print(f"[Diagram] Unknown type: {dtype}")
             return f"*[Diagram: unknown type '{dtype}']*"
-        result = renderer(data)
-        if result is None:
-            return f"*[Diagram: {dtype} render failed]*"
+        try:
+            result = renderer(data)
+            if result is None:
+                print(f"[Diagram] {dtype} render returned None")
+                # Check common causes for user-friendly message
+                if dtype in ("bar", "line", "pie"):
+                    labels = data.get("labels", [])
+                    values = data.get("values", [])
+                    if not labels or not values:
+                        return f"*[Diagram: {dtype} — labels atau values kosong]*"
+                    if len(labels) != len(values):
+                        return f"*[Diagram: {dtype} — jumlah labels ({len(labels)}) ≠ values ({len(values)})]*"
+                if dtype == "line":
+                    datasets = data.get("datasets", [])
+                    if not datasets:
+                        return f"*[Diagram: line — datasets kosong]*"
+                if dtype == "venn":
+                    sets = data.get("sets", [])
+                    if len(sets) < 2:
+                        return f"*[Diagram: venn — minimal 2 sets]*"
+                if dtype == "gantt":
+                    tasks = data.get("tasks", [])
+                    if not tasks:
+                        return f"*[Diagram: gantt — tasks kosong]*"
+                return f"*[Diagram: {dtype} gagal render (cek server log)]*"
+        except Exception as e:
+            print(f"[Diagram] {dtype} render exception: {e}")
+            return f"*[Diagram: {dtype} error — {e}]*"
         return result
     return DIAGRAM_RE.sub(_replace, markdown_text)

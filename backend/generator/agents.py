@@ -235,13 +235,27 @@ SYSTEM_PROMPTS = {
             "Anda adalah Lead Layouter yang ahli dalam visualisasi data akademik. "
             "Tugas Anda adalah menambahkan diagram, grafik, tabel, dan elemen visual "
             "ke dalam naskah jurnal untuk meningkatkan kejelasan dan dampak komunikasi. "
-            "Anda memahami kapan dan bagaimana menggunakan berbagai jenis visual."
+            "Anda memahami kapan dan bagaimana menggunakan berbagai jenis visual.\n\n"
+            "Keahlian khusus:\n"
+            "- Deteksi angka perbandingan dalam teks (MAE, RMSE, persentase, nilai uji) "
+            "dan ubah menjadi bar chart atau line chart.\n"
+            "- Ubah data tren temporal menjadi line chart.\n"
+            "- Ubah proporsi/persentase menjadi pie chart.\n"
+            "- Gunakan flowchart/concept_map untuk proses, hubungan kausal, dan hierarki.\n"
+            "- Gunakan tabel markdown untuk data tabular yang padat."
         ),
         "en": (
             "You are a Lead Layouter specialized in academic data visualization. "
             "Your role is to add diagrams, charts, tables, and visual elements "
             "to journal manuscripts to improve clarity and communication impact. "
-            "You understand when and how to use different types of visuals."
+            "You understand when and how to use different types of visuals.\n\n"
+            "Special skills:\n"
+            "- Detect comparison numbers in text (MAE, RMSE, percentages, test statistics) "
+            "and convert to bar/line charts.\n"
+            "- Convert temporal trends into line charts.\n"
+            "- Convert proportions/percentages into pie charts.\n"
+            "- Use flowcharts/concept_maps for processes, causal relationships, and hierarchies.\n"
+            "- Use markdown tables for dense tabular data."
         ),
     },
     "humanizer": {
@@ -889,77 +903,128 @@ def _lead_layout_prompt(
     section_heading: str, section_content: str,
     has_data: bool, user_data: Optional[str] = None,
 ) -> str:
+    BAR_EXAMPLE = '{"type": "bar", "title": "Perbandingan Metode Analisis", "labels": ["Regresi Linier", "ARIMA"], "values": [51368, 74744]}'
+    LINE_EXAMPLE = '{"type": "line", "title": "Tren Harga Emas", "labels": ["2020", "2021", "2022"], "datasets": [{"name": "XAU/USD", "values": [1800, 1750, 1900]}]}'
+    PIE_EXAMPLE = '{"type": "pie", "title": "Proporsi Metode", "labels": ["VECM", "Regresi", "IRF"], "values": [45, 35, 20]}'
+    GANTT_EXAMPLE = '{"type": "gantt", "title": "Timeline Penelitian", "tasks": [{"name": "Pengumpulan Data", "start": 0, "end": 3}]}'
+    FLOW_EXAMPLE = '{"type": "flowchart", "title": "Kerangka Berpikir", "nodes": [{"id": "A", "label": "XAU/USD"}, {"id": "B", "label": "Kurs IDR"}], "edges": [{"from": "A", "to": "B", "label": "pengaruh"}]}'
+
+    # Section-specific visualisation guidance
+    section_guidance = {
+        "purpose": "flowchart konseptual",
+        "theory": "peta konsep / diagram perbandingan teori",
+        "literature": "peta konsep perbandingan teori",
+        "method": "diagram alir langkah penelitian",
+        "result": "grafik data numerik (bar/line/pie) dari angka-angka dalam naskah",
+        "discussion": "grafik perbandingan / diagram alir kausalitas",
+        "conclusion": "diagram alir kesimpulan / rekomendasi",
+        "introduction": "diagram alir latar belakang",
+        "intisari": "diagram alir kerangka berpikir",
+        "pendahuluan": "diagram alir latar belakang",
+        "penutup": "diagram alir kesimpulan",
+        "abstract": "diagram alir kerangka penelitian",
+        "temuan": "grafik data numerik (bar/line/pie) dari angka-angka dalam naskah",
+        "pembahasan": "grafik perbandingan / diagram kausalitas",
+        "hasil": "grafik data numerik (bar/line/pie) dari angka-angka dalam naskah",
+    }
+
+    sec_lower = (section_heading + " " + section_key).lower()
+    matched_kind = "flowchart / concept_map"
+    for pat, kind in section_guidance.items():
+        if pat in sec_lower:
+            matched_kind = kind
+            break
+
+    has_numbers = bool(__import__("re").search(r"\d+[.,]\s*\d+", section_content))
+
     if language == "id":
-        return f"""Tema: "{theme}"
-Bagian: {section_heading}
+        user_block = ""
+        if user_data:
+            user_block = "\n\nDATA PENELITIAN DARI PENGGUNA (gunakan untuk diagram):\n" + user_data
 
-NASKAH:
-{section_content}
+        if has_data or has_numbers:
+            chart_instr = (
+                "\n\n1. **Grafik Data Numerik** (ekstrak angka asli dari naskah!):"
+                "\n   Format: ---DIAGRAM---"
+                "\n   " + BAR_EXAMPLE +
+                "\n   ---END DIAGRAM---"
+                "\n   Tipe: bar, line, pie, gantt"
+            )
+        else:
+            chart_instr = ""
 
----
-Tugas Anda sebagai Lead Layouter:
+        parts = [
+            'Tema: "' + theme + '"',
+            "Bagian: " + section_heading,
+            "",
+            "NASKAH:",
+            section_content,
+            "",
+            "---",
+            "Tugas Anda sebagai Lead Layouter:",
+            chart_instr,
+            "",
+            "2. **Diagram Alir / Peta Konsep** (untuk " + matched_kind + "):",
+            "   Format: ---DIAGRAM---",
+            "   " + FLOW_EXAMPLE,
+            "   ---END DIAGRAM---",
+            "   Tipe: flowchart, concept_map",
+            "",
+            "3. **Tabel Markdown** untuk data tabular.",
+            "",
+            "Aturan:",
+            "- HANYA tambah visual jika benar-benar meningkatkan pemahaman.",
+            "- Gunakan DATA ASLI dari naskah — JANGAN buat data palsu.",
+            "- Jangan hapus atau ubah teks yang sudah ada — hanya SELIPKAN blok diagram/tabel.",
+            "- Outputkan SELURUH naskah (teks + visual yang disisipkan), tanpa komentar tambahan.",
+        ]
+        if user_block:
+            parts.append(user_block)
+        return "\n".join(p for p in parts if p)
 
-Tambahkan elemen visual ke naskah di atas untuk meningkatkan kejelasan. Anda dapat menyisipkan:
+    user_block = ""
+    if user_data:
+        user_block = "\n\nUSER RESEARCH DATA (use for diagrams):\n" + user_data
 
-1. **Diagram Grafik** (hanya jika ada data numerik):
-   Format: ---DIAGRAM---
-   {{"type": "bar", "title": "...", "labels": [...], "values": [...]}}
-   ---END DIAGRAM---
-   Tipe: bar, line, pie, gantt
+    if has_data or has_numbers:
+        chart_instr = (
+            "\n\n1. **Data Charts** (extract real numbers from the text!):"
+            "\n   Format: ---DIAGRAM---"
+            "\n   " + BAR_EXAMPLE +
+            "\n   ---END DIAGRAM---"
+            "\n   Types: bar, line, pie, gantt"
+        )
+    else:
+        chart_instr = ""
 
-2. **Diagram Alir / Peta Konsep** (untuk proses, hubungan, hierarki):
-   Format: ---DIAGRAM---
-   {{"type": "flowchart", "title": "...", "nodes": [{{"id": "A", "label": "..."}}, ...], "edges": [{{"from": "A", "to": "B", "label": "..."}}]}}
-   ---END DIAGRAM---
-   Tipe: flowchart, concept_map
-
-3. **Tabel Markdown** untuk data tabular.
-
-4. **Diagram Venn** untuk perbandingan tumpang tindih:
-   ---DIAGRAM---
-   {{"type": "venn", "title": "...", "sets": {{"A": [...], "B": [...]}}, "intersections": {{"A_B": [...]}}}}
-   ---END DIAGRAM---
-
-Aturan:
-- HANYA tambah visual jika benar-benar meningkatkan pemahaman.
-- Gunakan DATA ASLI dari naskah — JANGAN buat data palsu.
-- Jangan hapus atau ubah teks yang sudah ada — hanya SELIPKAN blok diagram/tabel.
-- Outputkan SELURUH naskah (teks + visual yang disisipkan), tanpa komentar tambahan."""
-    return f"""Theme: "{theme}"
-Section: {section_heading}
-
-TEXT:
-{section_content}
-
----
-Your task as Lead Layouter:
-
-Add visual elements to the text above to improve clarity. You may insert:
-
-1. **Data Charts** (only if numeric data is present):
-   Format: ---DIAGRAM---
-   {{"type": "bar", "title": "...", "labels": [...], "values": [...]}}
-   ---END DIAGRAM---
-   Types: bar, line, pie, gantt
-
-2. **Flowcharts / Concept Maps** (for processes, relationships, hierarchies):
-   Format: ---DIAGRAM---
-   {{"type": "flowchart", "title": "...", "nodes": [{{"id": "A", "label": "..."}}, ...], "edges": [{{"from": "A", "to": "B", "label": "..."}}]}}
-   ---END DIAGRAM---
-   Types: flowchart, concept_map
-
-3. **Markdown Tables** for tabular data.
-
-4. **Venn Diagrams** for overlapping comparisons:
-   ---DIAGRAM---
-   {{"type": "venn", "title": "...", "sets": {{"A": [...], "B": [...]}}, "intersections": {{"A_B": [...]}}}}
-   ---END DIAGRAM---
-
-Rules:
-- ONLY add visuals when they truly improve understanding.
-- Use REAL data from the text — do NOT fabricate.
-- Do NOT delete or alter existing text — only INSERT diagram/table blocks.
-- Output the ENTIRE text (with inserted visuals), no extra commentary."""
+    parts = [
+        'Theme: "' + theme + '"',
+        "Section: " + section_heading,
+        "",
+        "TEXT:",
+        section_content,
+        "",
+        "---",
+        "Your task as Lead Layouter:",
+        chart_instr,
+        "",
+        "2. **Flowcharts / Concept Maps** (for " + matched_kind + "):",
+        "   Format: ---DIAGRAM---",
+        "   " + FLOW_EXAMPLE,
+        "   ---END DIAGRAM---",
+        "   Types: flowchart, concept_map",
+        "",
+        "3. **Markdown Tables** for tabular data.",
+        "",
+        "Rules:",
+        "- ONLY add visuals when they truly improve understanding.",
+        "- Use REAL data from the text — do NOT fabricate.",
+        "- Do NOT delete or alter existing text — only INSERT diagram/table blocks.",
+        "- Output the ENTIRE text (with inserted visuals), no extra commentary.",
+    ]
+    if user_block:
+        parts.append(user_block)
+    return "\n".join(p for p in parts if p)
 
 
 # ---- Orchestration ----

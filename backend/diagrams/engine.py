@@ -46,10 +46,11 @@ _MERMAID_SHAPES = {
 
 
 def _mermaid_shape(label: str, shape: str) -> str:
+    escaped = label.replace('"', "'").replace("\n", " ")
     pattern = _MERMAID_SHAPES.get(shape)
     if pattern:
-        return pattern.replace("{label}", label)
-    return f"[{label}]"
+        return pattern.replace("{label}", f'"{escaped}"')
+    return f'["{escaped}"]'
 
 
 def _mermaid_id(raw: str) -> str:
@@ -57,7 +58,7 @@ def _mermaid_id(raw: str) -> str:
 
 
 def _mermaid_escape(text: str) -> str:
-    return text.replace('"', "'")
+    return text.replace('"', "'").replace("\n", " ")
 
 
 def _build_mermaid_graph(
@@ -103,7 +104,7 @@ def _build_mermaid_graph(
             sg_lines.append(f"    %% {title}")
         seen_in_sg = set()
         for gname, members in groups.items():
-            sg_lines.append(f"    subgraph {_mermaid_id(gname)} [{_mermaid_escape(gname)}]")
+            sg_lines.append(f'    subgraph {_mermaid_id(gname)} ["{_mermaid_escape(gname)}"]')
             for n in nodes:
                 nid = _mermaid_id(n.get("id", ""))
                 if nid in members:

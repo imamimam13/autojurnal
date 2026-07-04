@@ -1,0 +1,139 @@
+{
+  "name": "Academic Thesis/Research Report Template",
+  "type": "textbook",
+  "sections": [
+    {
+      "level": 2,
+      "heading_id": "BAB I PENDAHULUAN",
+      "heading_en": "CHAPTER I INTRODUCTION"
+    },
+    {
+      "level": 2,
+      "heading_id": "BAB II KAJIAN TEORI",
+      "heading_en": "CHAPTER II THEORETICAL REVIEW"
+    },
+    {
+      "level": 2,
+      "heading_id": "BAB III METODOLOGI PENELITIAN",
+      "heading_en": "CHAPTER III RESEARCH METHODOLOGY"
+    },
+    {
+      "level": 2,
+      "heading_id": "BAB IV HASIL PENELITIAN & WAWANCARA KHUSUS",
+      "heading_en": "CHAPTER IV RESEARCH RESULTS & SPECIAL INTERVIEWS"
+    },
+    {
+      "level": 2,
+      "heading_id": "BAB V PEMBAHASAN LANJUTAN",
+      "heading_en": "CHAPTER V FURTHER DISCUSSION"
+    },
+    {
+      "level": 2,
+      "heading_id": "BAB VI PENUTUP",
+      "heading_en": "CHAPTER VI CONCLUSION"
+    }
+  ],
+  "constraints": {
+    "abstrak_maks": null,
+    "kata_kunci_maks": null,
+    "total_halaman_maks": null,
+    "citation_style": null
+  },
+  "chapter_subsections": [
+    {
+      "level": 3,
+      "heading_id": "Latar Belakang",
+      "heading_en": "Background"
+    },
+    {
+      "level": 3,
+      "heading_id": "Rumusan Masalah",
+      "heading_en": "Problem Statement"
+    },
+    {
+      "level": 3,
+      "heading_id": "Tujuan Penelitian",
+      "heading_en": "Research Objectives"
+    },
+    {
+      "level": 3,
+      "heading_id": "Pengertian dan Sejarah",
+      "heading_en": "Definition and History"
+    },
+    {
+      "level": 3,
+      "heading_id": "Pembeda Menurut Lapisan Sosial",
+      "heading_en": "Distinction by Social Class"
+    },
+    {
+      "level": 3,
+      "heading_id": "Perspektif Agama Islam",
+      "heading_en": "Islamic Religious Perspective"
+    },
+    {
+      "level": 3,
+      "heading_id": "Jenis dan Pendekatan",
+      "heading_en": "Type and Approach"
+    },
+    {
+      "level": 3,
+      "heading_id": "Subjek Penelitian",
+      "heading_en": "Research Subjects"
+    },
+    {
+      "level": 3,
+      "heading_id": "Instrumen dan Teknik Analisis",
+      "heading_en": "Instruments and Analysis Techniques"
+    },
+    {
+      "level": 3,
+      "heading_id": "Wawancara Kalangan Bangsawan",
+      "heading_en": "Interview with Nobility"
+    },
+    {
+      "level": 3,
+      "heading_id": "Wawancara Kalangan Menengah ke Bawah",
+      "heading_en": "Interview with Middle to Lower Class"
+    },
+    {
+      "level": 3,
+      "heading_id": "Ringkasan Perbandingan",
+      "heading_en": "Comparison Summary"
+    },
+    {
+      "level": 3,
+      "heading_id": "Struktur Biaya Uang Panaik Suku Bugis",
+      "heading_en": "Cost Structure of Bugis Panaik Money"
+    },
+    {
+      "level": 3,
+      "heading_id": "Uang Panaik berkembang dari pembeda keturunan menjadi symbol penghormatan umum",
+      "heading_en": "Panaik money evolved from a lineage differentiator to a general symbol of respect"
+    },
+    {
+      "level": 3,
+      "heading_id": "Ada celah: berubah menjadi ajang gengsi dapat menyebabkan keterlambatan nikah atau kawin lari.",
+      "heading_en": "There's a loophole: becoming a matter of prestige can cause marriage delays or elopement."
+    },
+    {
+      "level": 3,
+      "heading_id": "Harus selaras syariat: mahar terpisah, uang Panaik sederhana dan wajar",
+      "heading_en": "Must be in line with Sharia: dowry separate, Panaik money simple and reasonable"
+    },
+    {
+      "level": 3,
+      "heading_id": "Nilai budaya Siri’na Pacce paling tepat jika diisi kejujuran, tanggung jawab, dan kasih sayang, bukan sekedar nominal",
+      "heading_en": "The cultural value of Siri'na Pacce is best filled with honesty, responsibility, and affection, not just a nominal value"
+    },
+    {
+      "level": 3,
+      "heading_id": "Kesimpulan",
+      "heading_en": "Conclusion"
+    },
+    {
+      "level": 3,
+      "heading_id": "Saran",
+      "heading_en": "Suggestions"
+    }
+  ]
+}

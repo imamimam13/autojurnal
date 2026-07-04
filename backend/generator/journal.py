@@ -10,6 +10,12 @@ CRITICAL — ORIGINAL WRITING ONLY:
 - Write as if you are creating new knowledge and analysis, not summarizing existing papers.
 - After writing, each sentence should look like YOU wrote it, not like a rewritten abstract.
 
+NARRATIVE VARIETY & ANTI-REPETITION:
+- DO NOT use repetitive sentence starters or narrative clichés. Avoid beginning paragraphs or sentences with robotic templates like "This study aims to...", "The results of this study show...", "This is in line with...", or "Research conducted by (Author, Year) found...".
+- Vary sentence structures: Integrate active transitions and direct analytical synthesis. Write the theoretical or empirical claim directly (e.g., "Integrating AI in pulmonary diagnostics drives a 90% increase in accuracy (Author, Year)"), instead of listing paper metadata.
+- Limit transition overuse: Restrict repetitive transitions like "Furthermore,", "In addition,", "Moreover,", "However,", "Overall," at the start of paragraphs or sentences.
+- Vary sentence lengths dynamically to create a natural, human-like flow.
+
 IMPORTANT CITATION RULES:
 1. Every claim or finding MUST be supported by an inline parenthetical citation in APA format: (Author, Year).
 2. Cite papers as evidence for YOUR analysis — do not just list what each paper said.
@@ -38,6 +44,12 @@ KRITIS — HARUS TULISAN ORISINAL:
 - JANGAN meniru atau mendekati kata-kata, struktur, atau frasa khas dari abstrak paper mana pun.
 - Tulislah seolah Anda menciptakan pengetahuan dan analisis baru, bukan meringkas paper yang ada.
 - Setelah selesai, setiap kalimat harus terlihat seperti tulisan ANDA, bukan seperti abstrak yang ditulis ulang.
+
+VARIASI NARASI & ANTI-REPETISI:
+- JANGAN gunakan kalimat pembuka yang seragam atau repetitif. Hindari memulai paragraf atau kalimat dengan template pasif seperti "Penelitian ini bertujuan untuk...", "Hasil penelitian menunjukkan bahwa...", "Hal ini sejalan dengan penelitian oleh...", atau "Penelitian yang dilakukan oleh (Penulis, Tahun) menemukan...".
+- Variasikan struktur kalimat: Gunakan variasi subjek, transisi aktif, dan sudut pandang analitis. Alih-alih menceritakan apa yang dilakukan paper lain, tulis klaim ilmiahnya langsung (misalnya: "Integrasi AI dalam diagnostik paru memicu peningkatan akurasi hingga 90% (Author, Year)").
+- Batasi kata hubung berulang: Hindari pengulangan kata transisi di awal kalimat/paragraf seperti "Selain itu,", "Lebih lanjut,", "Dalam konteks ini,", "Secara keseluruhan,", "Namun,".
+- Variasikan panjang kalimat secara dinamis agar aliran bahasa terasa alami dan manusiawi.
 
 ATURAN SITASI PENTING:
 1. Setiap klaim atau temuan HARUS didukung oleh sitasi inline format APA: (Penulis, Tahun).
@@ -200,6 +212,7 @@ def build_part_prompt(
     rag_context: Optional[str] = None,
     has_data: bool = False,
     user_data: Optional[str] = None,
+    draft_idea: Optional[str] = None,
 ) -> str:
     template = BASE_TEMPLATE_ID if language == "id" else BASE_TEMPLATE_EN
     sections = SECTIONS["id" if language == "id" else "en"]
@@ -223,20 +236,16 @@ def build_part_prompt(
     if rag_context:
         if language == "id":
             rag_block = (
-                "\n\n---\n"
-                "BERIKUT ADALAH KONTEN ASLI DARI PAPER YANG RELEVAN.\n"
-                "Gunakan informasi di bawah ini sebagai SUMBER ANALISIS dan TEMUAN Anda.\n"
-                "JANGAN pernah menyalin kalimat dari konten ini — bacalah, pahami, lalu tulis ulang dengan struktur kalimat dan kata-kata ANDA SENDIRI.\n"
-                "Setiap fakta atau temuan yang Anda gunakan WAJIB disertai sitasi (Penulis, Tahun).\n"
+                "\n\nPENTING: Gunakan kutipan dan temuan RAG (Retrieval-Augmented Generation) "
+                "di bawah ini untuk mendukung setiap klaim ilmiah Anda. "
+                "Setiap fakta atau temuan yang Anda gunakan WAJIB dirujuk dengan (Penulis, Tahun).\n"
                 f"{rag_context}\n"
                 "---\n"
             )
         else:
             rag_block = (
-                "\n\n---\n"
-                "BELOW IS THE ACTUAL CONTENT FROM RELEVANT PAPERS.\n"
-                "Use this information as a SOURCE for your ANALYSIS and FINDINGS.\n"
-                "NEVER copy sentences from this content — read, understand, then rewrite using YOUR OWN sentence structures and words.\n"
+                "\n\nIMPORTANT: Use the RAG (Retrieval-Augmented Generation) context and findings "
+                "below to ground and support every academic claim you make. "
                 "Every fact or finding you use MUST be cited with (Author, Year).\n"
                 f"{rag_context}\n"
                 "---\n"
@@ -254,6 +263,13 @@ def build_part_prompt(
         "Full references belong only in the References section."
     )
 
+    draft_block = ""
+    if draft_idea:
+        if language == "id":
+            draft_block = f"\nDRAFT IDE PENULIS (Harus dikembangkan dan dijadikan landasan utama penulisan):\n{draft_idea}\n\n"
+        else:
+            draft_block = f"\nAUTHOR'S DRAFT IDEA (Must be expanded and serve as the core foundation of the text):\n{draft_idea}\n\n"
+
     # Only include paper list in part 1 to save tokens
     if part == 1:
         paper_list = build_paper_list(papers)
@@ -261,8 +277,9 @@ def build_part_prompt(
             template.format(length_instruction=length_instruction, paper_list=paper_list)
             + rag_block
             + f'\n{theme_label}: "{theme}"\n\n'
+            + draft_block
             + section_info["instruction"]
-            + diagram_instruction(has_data, language, user_data)
+            + diagram_instruction(has_data, language, user_data, content=rag_context or "")
             + no_ref
             + "\n\nOutput ONLY the sections listed above. Nothing else."
         )
@@ -272,8 +289,9 @@ def build_part_prompt(
             f"{brief_note}{rag_block}\n\n"
             f"ALREADY WRITTEN (previous parts of the journal):\n\n{previous_content}\n\n"
             f"---\n\n"
+            + draft_block
             + section_info["instruction"]
-            + diagram_instruction(has_data, language, user_data)
+            + diagram_instruction(has_data, language, user_data, content=(previous_content or "") + (rag_context or ""))
             + no_ref
             + "\n\nContinue from where the previous part left off. Do NOT repeat sections already written. Output ONLY the new sections."
         )

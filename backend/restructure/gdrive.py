@@ -64,7 +64,7 @@ async def resolve_link(url: str) -> Optional[dict]:
                     if len(text) > 50:
                         return {
                             "filename": f"gdoc_{docs_id[:8]}.txt",
-                            "text": text,
+                            "content": text.encode("utf-8"),
                             "ext": ".txt",
                         }
         except Exception as e:
@@ -81,7 +81,7 @@ async def resolve_link(url: str) -> Optional[dict]:
             resp = await client.get(download_url)
             if resp.status_code != 200:
                 return None
-            text = resp.text
+            content = resp.content
             # Try to detect if it's a PDF from content-type
             ct = resp.headers.get("content-type", "")
             ext = ".txt"
@@ -91,7 +91,7 @@ async def resolve_link(url: str) -> Optional[dict]:
                 ext = ".docx"
             return {
                 "filename": f"gdrive_{drive_id[:8]}{ext}",
-                "text": text,
+                "content": content,
                 "ext": ext,
             }
     except Exception as e:

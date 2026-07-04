@@ -170,14 +170,22 @@ class WorksStore:
             self.client.upsert(collection_name=COLLECTION, points=batch)
         self._built = True
 
-    # ---- Public API ----
+    def _get_current_dim(self) -> int:
+        try:
+            info = self.client.get_collection(COLLECTION)
+            if info and info.config and info.config.params and info.config.params.vectors:
+                return info.config.params.vectors.size
+        except Exception:
+            pass
+        return 1
 
     def save_work(self, work: WorkRecord):
+        dim = self._get_current_dim()
         self.client.upsert(
             collection_name=COLLECTION,
             points=[PointStruct(
                 id=abs(hash(work.work_id)) % (2**63),
-                vector=[0.0],
+                vector=[0.0] * dim,
                 payload=work.to_payload(),
             )],
         )
@@ -250,13 +258,7 @@ class WorksStore:
         return False
 
     def count(self) -> int:
-        scroll = self.client.scroll(
-            collection_name=COLLECTION,
-            with_payload=False,
-            with_vectors=False,
-            limit=0,
-        )
-        return len(scroll[0])
+        return self.client.count(collection_name=COLLECTION).count
 
 
 # ---- Librarian: format context for injection ----

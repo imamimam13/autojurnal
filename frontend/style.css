@@ -1,206 +1,386 @@
+/* Import Google Font Outfit */
 body {
-    background: #0f0f1a;
+    font-family: 'Outfit', sans-serif;
+    background: #0d0d16;
+    color: #e2e8f0;
     min-height: 100vh;
 }
 
-.navbar {
-    background: #1a1a2e !important;
+/* Custom Webkit Scrollbars */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+::-webkit-scrollbar-track {
+    background: #0d0d16;
+}
+::-webkit-scrollbar-thumb {
+    background: #2d2d44;
+    border: 2px solid #0d0d16;
+    border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #c084fc;
 }
 
+/* Navbar with Neo-Brutalist Border */
+.navbar {
+    background: #16162a !important;
+    border-bottom: 3.5px solid #000000 !important;
+    padding: 1rem 0;
+}
+.navbar-brand {
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    font-size: 1.6rem;
+    color: #c084fc !important;
+    text-shadow: 2px 2px 0px #000;
+}
+
+/* Cards with Manga Outlines and Flat Offset Drop Shadows */
 .card {
     background: #1a1a2e;
-    border: 1px solid #2a2a4a;
+    border: 2.5px solid #000000 !important;
+    box-shadow: 5px 5px 0px #000000 !important;
+    border-radius: 14px !important;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
 }
-
 .card-header {
-    background: #16162a;
-    border-bottom: 1px solid #2a2a4a;
+    background: #24243e;
+    border-bottom: 2.5px solid #000000 !important;
+    font-weight: 700;
+    color: #c084fc;
+    padding: 0.85rem 1.25rem;
+}
+.card-title {
+    font-weight: 700;
+    font-size: 1.25rem;
+    color: #f1f5f9;
 }
 
-.form-control, .form-select {
-    background: #0f0f1a;
-    border: 1px solid #2a2a4a;
-    color: #e0e0e0;
+/* Tactile Neo-Brutalist Buttons */
+.btn {
+    border: 2.5px solid #000000 !important;
+    border-radius: 10px !important;
+    box-shadow: 3.5px 3.5px 0px #000000 !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    letter-spacing: 0.5px;
+    transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+}
+.btn:hover {
+    transform: translate(-3px, -3px) !important;
+    box-shadow: 6.5px 6.5px 0px #000000 !important;
+}
+.btn:active {
+    transform: translate(2.5px, 2.5px) !important;
+    box-shadow: 1px 1px 0px #000000 !important;
 }
 
-.form-control:focus, .form-select:focus {
-    background: #0f0f1a;
-    border-color: #6c5ce7;
-    box-shadow: 0 0 0 0.2rem rgba(108, 92, 231, 0.25);
-    color: #e0e0e0;
-}
-
+/* Button Variants */
 .btn-primary {
-    background: #6c5ce7;
-    border-color: #6c5ce7;
+    background: #c084fc !important;
+    color: #000000 !important;
 }
-
 .btn-primary:hover {
-    background: #5a4bd1;
-    border-color: #5a4bd1;
+    background: #b070ec !important;
+}
+.btn-success {
+    background: #2dd4bf !important;
+    color: #000000 !important;
+}
+.btn-success:hover {
+    background: #14b8a6 !important;
+}
+.btn-danger {
+    background: #f43f5e !important;
+    color: #ffffff !important;
+}
+.btn-danger:hover {
+    background: #e11d48 !important;
+}
+.btn-outline-primary {
+    color: #c084fc !important;
+    background: transparent !important;
+    border-color: #000000 !important;
+}
+.btn-outline-primary:hover, .btn-outline-primary.active {
+    background: #c084fc !important;
+    color: #000000 !important;
+}
+.btn-outline-secondary {
+    color: #94a3b8 !important;
+    background: transparent !important;
+    border-color: #000000 !important;
+}
+.btn-outline-secondary:hover {
+    background: #475569 !important;
+    color: #ffffff !important;
 }
 
-.paper-item {
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid #2a2a4a;
-    transition: background 0.2s;
-}
-
-.paper-item:hover {
-    background: #222244;
-}
-
-.paper-item:last-child {
-    border-bottom: none;
-}
-
-.paper-item.selected {
-    background: #1a1a3a;
-    border-left: 3px solid #6c5ce7;
-}
-
-.paper-item .form-check-input {
-    cursor: pointer;
-    margin-top: 0.25rem;
-}
-
-.paper-item .paper-title {
+/* Forms & Selects with Outlines */
+.form-control, .form-select {
+    background: #121224 !important;
+    border: 2.5px solid #000000 !important;
+    border-radius: 10px !important;
+    color: #f1f5f9 !important;
+    box-shadow: 2px 2px 0px #000000 !important;
+    padding: 0.65rem 1rem;
     font-weight: 500;
-    color: #c8c8ff;
+    transition: all 0.15s ease-in-out;
+}
+.form-control:focus, .form-select:focus {
+    background: #121224 !important;
+    border-color: #c084fc !important;
+    box-shadow: 4px 4px 0px #000000 !important;
+    color: #ffffff !important;
+}
+.form-control::placeholder {
+    color: #4b5563;
 }
 
+/* Badges with Outlines */
+.badge {
+    border: 2px solid #000000 !important;
+    box-shadow: 2px 2px 0px #000000 !important;
+    border-radius: 6px !important;
+    font-weight: 700 !important;
+    padding: 0.4rem 0.6rem !important;
+}
+.bg-secondary {
+    background-color: #475569 !important;
+    color: #ffffff !important;
+}
+.bg-primary {
+    background-color: #c084fc !important;
+    color: #000000 !important;
+}
+.bg-success {
+    background-color: #2dd4bf !important;
+    color: #000000 !important;
+}
+.bg-warning {
+    background-color: #fbbf24 !important;
+    color: #000000 !important;
+}
+
+/* Tab button group */
+.btn-group {
+    border: 2.5px solid #000000 !important;
+    border-radius: 12px !important;
+    overflow: hidden;
+    box-shadow: 4px 4px 0px #000000 !important;
+}
+.btn-group .btn {
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    text-transform: none !important;
+    font-weight: 600 !important;
+    padding: 0.75rem 1rem !important;
+}
+.btn-group .btn:hover {
+    transform: none !important;
+    background: rgba(192, 132, 252, 0.1) !important;
+}
+.btn-group .btn.active {
+    background: #c084fc !important;
+    color: #000000 !important;
+}
+
+/* Paper Items Curation List */
+.paper-item {
+    background: #1c1c34;
+    border: 2px solid #000000 !important;
+    box-shadow: 3px 3px 0px #000000 !important;
+    border-radius: 10px !important;
+    margin-bottom: 0.75rem;
+    padding: 1rem;
+    transition: all 0.15s ease-in-out;
+}
+.paper-item:hover {
+    background: #252544;
+    transform: translate(-1px, -1px);
+    box-shadow: 4px 4px 0px #000000 !important;
+}
+.paper-item.selected {
+    border-left: 6px solid #2dd4bf !important;
+    background: #1c2c3c;
+}
+.paper-item .paper-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #c084fc;
+}
 .paper-item .paper-meta {
     font-size: 0.85rem;
-    color: #888;
+    color: #94a3b8;
+    margin-top: 0.25rem;
 }
-
 .paper-item .doi-badge {
-    color: #6c5ce7;
+    color: #2dd4bf;
+    font-weight: 600;
     font-size: 0.8rem;
 }
-
 .paper-item .no-doi {
-    color: #666;
+    color: #64748b;
     font-size: 0.8rem;
     font-style: italic;
 }
-
-.paper-item .oa-link,
 .paper-item .paper-link {
-    color: #888;
+    color: #38bdf8;
     text-decoration: none;
-    font-size: 0.8rem;
+    font-weight: 600;
 }
-
-.paper-item .oa-link:hover,
 .paper-item .paper-link:hover {
-    color: #6c5ce7;
+    text-decoration: underline;
 }
-
-.paper-item .paper-link {
-    color: #4ecdc4;
-}
-
 .paper-item .paper-abstract {
-    font-size: 0.9rem;
-    color: #aaa;
-    margin-top: 0.5rem;
-    display: none;
+    background: #121224;
+    border: 1.5px solid #000000;
+    border-radius: 6px;
+    padding: 0.75rem;
+    font-size: 0.88rem;
+    color: #cbd5e1;
+    margin-top: 0.75rem;
+    line-height: 1.5;
 }
 
-.paper-item .paper-abstract.expanded {
-    display: block;
-}
-
+/* Journal Output Typography (Anime Novel Style) */
 #journal-content {
     line-height: 1.8;
-    font-size: 0.95rem;
+    font-size: 1rem;
+    color: #e2e8f0;
+    padding: 1.5rem;
 }
-
 #journal-content h1 {
-    font-size: 1.6rem;
-    margin-top: 1.5rem;
-    margin-bottom: 1rem;
-    color: #c8c8ff;
-    border-bottom: 1px solid #2a2a4a;
+    font-size: 1.75rem;
+    font-weight: 800;
+    margin-top: 2rem;
+    margin-bottom: 1.25rem;
+    color: #c084fc;
+    border-bottom: 2.5px solid #000000;
     padding-bottom: 0.5rem;
+    text-shadow: 1px 1px 0px #000;
 }
-
 #journal-content h2 {
-    font-size: 1.3rem;
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-top: 1.75rem;
+    margin-bottom: 1rem;
+    color: #2dd4bf;
+    text-shadow: 1px 1px 0px #000;
+}
+#journal-content h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
     margin-top: 1.5rem;
     margin-bottom: 0.75rem;
-    color: #b8b8ee;
+    color: #38bdf8;
 }
-
-#journal-content h3 {
-    font-size: 1.1rem;
-    margin-top: 1.2rem;
-    margin-bottom: 0.5rem;
-    color: #a8a8dd;
-}
-
 #journal-content p {
-    margin-bottom: 0.75rem;
+    margin-bottom: 1.25rem;
     text-align: justify;
 }
-
 #journal-content ul, #journal-content ol {
-    margin-bottom: 0.75rem;
+    margin-bottom: 1.25rem;
+    padding-left: 1.5rem;
 }
-
 #journal-content li {
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.5rem;
 }
 
+/* Paragraph Editing Wrapper & Interactive Anime Elements */
 .para-wrapper {
     position: relative;
-    transition: background 0.2s;
-    border-radius: 4px;
-    padding: 2px 0;
+    transition: all 0.2s ease;
+    border-radius: 8px;
+    padding: 0.4rem 0.75rem;
+    margin-bottom: 0.5rem;
 }
-
 .para-wrapper:hover {
-    background: rgba(108, 92, 231, 0.08);
+    background: rgba(192, 132, 252, 0.08);
+    box-shadow: inset 0 0 0 1.5px rgba(192, 132, 252, 0.3);
 }
-
 .para-controls {
     position: absolute;
-    right: 0;
-    top: 0;
+    right: 10px;
+    top: -12px;
     display: none;
-    gap: 2px;
+    gap: 4px;
     background: #1a1a2e;
-    border: 1px solid #2a2a4a;
-    border-radius: 4px;
-    padding: 2px;
+    border: 2px solid #000000;
+    border-radius: 8px;
+    box-shadow: 2px 2px 0px #000000;
+    padding: 3px;
     z-index: 10;
 }
-
 .para-wrapper:hover .para-controls {
     display: flex;
 }
-
 .btn-para {
     background: none;
     border: none;
-    color: #888;
-    padding: 2px 6px;
+    color: #94a3b8;
+    padding: 3px 8px;
     cursor: pointer;
     font-size: 0.75rem;
-    border-radius: 3px;
+    font-weight: 700;
+    border-radius: 5px;
     transition: all 0.15s;
 }
-
 .btn-para:hover {
-    background: #6c5ce7;
-    color: #fff;
+    background: #c084fc;
+    color: #000000;
 }
 
-.para-edit-textarea {
-    min-height: 80px;
-    font-size: 0.9rem;
+/* Retro Matrix Terminal Log Area */
+.logs-container {
+    background: #0a0a14 !important;
+    border: 2.5px solid #000000 !important;
+    box-shadow: inset 3px 3px 8px rgba(0,0,0,0.7) !important;
+    border-radius: 12px !important;
+    color: #34d399 !important; /* bright retro neon green logs */
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.85rem;
     line-height: 1.6;
-    margin-bottom: 0.5rem;
-    resize: vertical;
+}
+
+/* Revision/Diff Area styling */
+.rev-diff-added {
+    background-color: rgba(45, 212, 191, 0.15);
+    border-left: 3px solid #2dd4bf;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+}
+.rev-diff-deleted {
+    background-color: rgba(244, 63, 94, 0.15);
+    border-left: 3px solid #f43f5e;
+    text-decoration: line-through;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+}
+
+/* Custom CSS helper tags */
+.font-semibold {
+    font-weight: 600;
+}
+.font-bold {
+    font-weight: 700;
+}
+
+/* Modals with custom styles */
+.modal-content {
+    background: #1a1a2e;
+    border: 3px solid #000000 !important;
+    box-shadow: 8px 8px 0px #000000 !important;
+    border-radius: 16px !important;
+}
+.modal-header {
+    border-bottom: 2.5px solid #000000 !important;
+}
+.modal-footer {
+    border-top: 2.5px solid #000000 !important;
 }

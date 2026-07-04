@@ -36,6 +36,9 @@
                     <button class="btn btn-outline-primary" id="tab-translate-btn" onclick="showTab('translate')">
                         <i class="bi bi-translate me-2"></i>Translate
                     </button>
+                    <button class="btn btn-outline-primary" id="tab-idea-btn" onclick="showTab('idea')">
+                        <i class="bi bi-lightbulb me-2"></i>Ide ke Jurnal
+                    </button>
                 </div>
 
                 <div id="tab-generate">
@@ -168,6 +171,40 @@ Or Markdown table:
 | Age      | 45.2 | 3.1 |
 | Weight   | 72.5 | 5.8 |"></textarea>
                                 <div class="form-text">Upload CSV/TSV/JSON/TXT/MD — isi file otomatis masuk ke textarea. Untuk Excel (.xlsx/.xls) akan dikonversi otomatis via library SheetJS.</div>
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label for="paradigm" class="form-label">Paradigma Penelitian (Paradigm)</label>
+                                <select class="form-select" id="paradigm">
+                                    <option value="auto">Auto (AI Determined)</option>
+                                    <option value="Konstruktivisme">Konstruktivisme (Constructivism)</option>
+                                    <option value="Interpretivisme">Interpretivisme (Interpretivism)</option>
+                                    <option value="Positivisme">Positivisme (Positivism)</option>
+                                    <option value="Post-Positivisme">Post-Positivisme (Post-Positivism)</option>
+                                    <option value="Pragmatisme">Pragmatisme (Pragmatism)</option>
+                                    <option value="Teori Kritis">Teori Kritis (Critical Theory)</option>
+                                    <option value="Post-Modernisme">Post-Modernisme (Post-Modernism)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="analysis-method" class="form-label">Metode Analisis (Analysis Method)</label>
+                                <select class="form-select" id="analysis-method">
+                                    <option value="auto">Auto (AI Determined)</option>
+                                    <option value="Analisis Tematik">Analisis Tematik (Thematic Analysis)</option>
+                                    <option value="Grounded Theory">Grounded Theory</option>
+                                    <option value="Fenomenologi">Fenomenologi (Phenomenology)</option>
+                                    <option value="Analisis Isi">Analisis Isi (Content Analysis)</option>
+                                    <option value="Studi Kasus">Studi Kasus (Case Study)</option>
+                                    <option value="Etnografi">Etnografi (Ethnography)</option>
+                                    <option value="Analisis Naratif">Analisis Naratif (Narrative Analysis)</option>
+                                    <option value="Analisis Regresi">Analisis Regresi (Regression Analysis)</option>
+                                    <option value="Uji-t / ANOVA">Uji-t / ANOVA (t-Test / ANOVA)</option>
+                                    <option value="SEM (Structural Equation Modeling)">SEM (Structural Equation Modeling)</option>
+                                    <option value="Statistik Deskriptif & Inferensial">Statistik Deskriptif & Inferensial (Descriptive & Inferential Statistics)</option>
+                                    <option value="Analisis Korelasi">Analisis Korelasi (Correlation Analysis)</option>
+                                </select>
                             </div>
                         </div>
 
@@ -528,6 +565,221 @@ Or Markdown table:
                         </div>
                     </div>
                 </div> <!-- /tab-translate -->
+
+                <div id="tab-idea" class="tab-content" style="display:none;">
+                    <!-- Configuration Card -->
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title mb-3">
+                                <i class="bi bi-lightbulb me-2"></i>Buat Jurnal dari Draf Ide
+                            </h5>
+                            <p class="text-muted small">
+                                Unggah draf kasar, ide penelitian, atau kerangka naskah Anda. Sistem akan otomatis menganalisis ide utama, mencari referensi terbaru, dan menulis naskah lengkap sesuai template.
+                            </p>
+
+                            <div class="mb-3">
+                                <label for="idea-file-input" class="form-label font-semibold">Upload Draf Ide (PDF, DOCX, TXT, MD)</label>
+                                <input type="file" class="form-control" id="idea-file-input" accept=".pdf,.docx,.txt,.md">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="idea-link-input" class="form-label font-semibold">Atau Tempel Link Google Docs / Google Drive</label>
+                                <input type="url" class="form-control" id="idea-link-input" placeholder="https://docs.google.com/document/d/... atau https://drive.google.com/file/d/...">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="idea-sources-input" class="form-label font-semibold">Tambahkan Referensi/Sumber Manual (PDF, DOCX, TXT, MD - Bisa Pilih Banyak File)</label>
+                                <input type="file" class="form-control" id="idea-sources-input" accept=".pdf,.docx,.txt,.md" multiple>
+                                <div class="form-text">Opsional. File-file referensi manual ini akan di-parse dan dimasukkan ke daftar referensi di bawah untuk memperkuat analisis draf ide Anda.</div>
+                            </div>
+
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-3">
+                                    <label for="idea-language" class="form-label">Language</label>
+                                    <select class="form-select" id="idea-language">
+                                        <option value="en">English</option>
+                                        <option value="id" selected>Bahasa Indonesia</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="idea-mode" class="form-label">Mode</label>
+                                    <select class="form-select" id="idea-mode" onchange="toggleIdeaTextbookOptions()">
+                                        <option value="journal" selected>Journal</option>
+                                        <option value="textbook">Textbook</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3" id="idea-target-length-group">
+                                    <label for="idea-target-length" class="form-label">Target Length</label>
+                                    <select class="form-select" id="idea-target-length">
+                                        <option value="short">Short (~5 pages)</option>
+                                        <option value="medium" selected>Medium (~15 pages)</option>
+                                        <option value="long">Long (~30 pages)</option>
+                                        <option value="extended">Extended (~50 pages)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-none" id="idea-num-chapters-group">
+                                    <label for="idea-num-chapters" class="form-label">Number of Chapters</label>
+                                    <select class="form-select" id="idea-num-chapters">
+                                        <option value="5">5 Chapters</option>
+                                        <option value="10" selected>10 Chapters</option>
+                                        <option value="15">15 Chapters</option>
+                                        <option value="20">20 Chapters</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="idea-template" class="form-label">Preset Template</label>
+                                    <select class="form-select" id="idea-template">
+                                        <option value="">Default (IMRAD)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-6">
+                                    <label for="idea-paradigm" class="form-label">Paradigma Penelitian (Paradigm)</label>
+                                    <select class="form-select" id="idea-paradigm">
+                                        <option value="auto">Auto (AI Determined)</option>
+                                        <option value="Konstruktivisme">Konstruktivisme (Constructivism)</option>
+                                        <option value="Interpretivisme">Interpretivisme (Interpretivism)</option>
+                                        <option value="Positivisme">Positivisme (Positivism)</option>
+                                        <option value="Post-Positivisme">Post-Positivisme (Post-Positivism)</option>
+                                        <option value="Pragmatisme">Pragmatisme (Pragmatism)</option>
+                                        <option value="Teori Kritis">Teori Kritis (Critical Theory)</option>
+                                        <option value="Post-Modernisme">Post-Modernisme (Post-Modernism)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="idea-analysis-method" class="form-label">Metode Analisis (Analysis Method)</label>
+                                    <select class="form-select" id="idea-analysis-method">
+                                        <option value="auto">Auto (AI Determined)</option>
+                                        <option value="Analisis Tematik">Analisis Tematik (Thematic Analysis)</option>
+                                        <option value="Grounded Theory">Grounded Theory</option>
+                                        <option value="Fenomenologi">Fenomenologi (Phenomenology)</option>
+                                        <option value="Analisis Isi">Analisis Isi (Content Analysis)</option>
+                                        <option value="Studi Kasus">Studi Kasus (Case Study)</option>
+                                        <option value="Etnografi">Etnografi (Ethnography)</option>
+                                        <option value="Analisis Naratif">Analisis Naratif (Narrative Analysis)</option>
+                                        <option value="Analisis Regresi">Analisis Regresi (Regression Analysis)</option>
+                                        <option value="Uji-t / ANOVA">Uji-t / ANOVA (t-Test / ANOVA)</option>
+                                        <option value="SEM (Structural Equation Modeling)">SEM (Structural Equation Modeling)</option>
+                                        <option value="Statistik Deskriptif & Inferensial">Statistik Deskriptif & Inferensial (Descriptive & Inferential Statistics)</option>
+                                        <option value="Analisis Korelasi">Analisis Korelasi (Correlation Analysis)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <button class="btn btn-primary btn-lg w-100" id="idea-analyze-btn" onclick="analyzeIdea()">
+                                <i class="bi bi-search me-2"></i>Analisis Draf Ide & Cari Referensi
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Analysis and Search Results Panel (Initially Hidden) -->
+                    <div id="idea-analysis-panel" class="mb-4" style="display: none;">
+                        <div class="card mb-4">
+                            <div class="card-body">
+                                <h5 class="card-title mb-3">
+                                    <i class="bi bi-magic me-2"></i>Hasil Analisis Ide Utama & Query
+                                </h5>
+
+                                <div class="mb-3">
+                                    <label for="idea-extracted-text" class="form-label">Rangkuman Ide Utama yang Diekstrak (Bisa Diedit)</label>
+                                    <textarea class="form-control" id="idea-extracted-text" rows="5"></textarea>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="idea-search-query" class="form-label">Query Pencarian Referensi Akademik Terkait (Bisa Diedit)</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="idea-search-query">
+                                        <button class="btn btn-outline-primary" onclick="searchIdeaReferences()">
+                                            <i class="bi bi-arrow-repeat me-1"></i>Perbarui Referensi
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- References Curate Panel -->
+                        <div class="card mb-4" id="idea-references-card" style="display: none;">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="card-title mb-0">
+                                        <i class="bi bi-book me-2"></i>Referensi Akademik Terkait (OpenAlex)
+                                    </h5>
+                                    <span class="badge bg-primary" id="idea-ref-count">0 ditemukan</span>
+                                </div>
+                                <div class="table-responsive" style="max-height: 350px;">
+                                    <table class="table table-hover align-middle small" id="idea-ref-table">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 40px;"><input type="checkbox" id="idea-select-all" checked onchange="toggleAllIdeaRefs()"></th>
+                                                <th>Title</th>
+                                                <th>Authors & Year</th>
+                                                <th>Cites</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+
+                                <div class="row g-3 mt-3 align-items-center">
+                                    <div class="col-md-6">
+                                        <div class="form-check form-switch font-semibold">
+                                            <input class="form-check-input" type="checkbox" id="idea-do-research">
+                                            <label class="form-check-label" for="idea-do-research">Do Web Research (Bing + Google Scholar)</label>
+                                        </div>
+                                        <div class="form-check form-switch font-semibold">
+                                            <input class="form-check-input" type="checkbox" id="idea-library">
+                                            <label class="form-check-label" for="idea-library">Cek Orisinalitas (Library Context)</label>
+                                        </div>
+                                        <div class="form-check form-switch font-semibold">
+                                            <input class="form-check-input" type="checkbox" id="idea-multi-agent">
+                                            <label class="form-check-label" for="idea-multi-agent">Gunakan Multi-Agent Pipeline (10 Agen per Section)</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6 text-end">
+                                        <button class="btn btn-success btn-lg px-5" id="idea-generate-btn" onclick="generateFromIdea()">
+                                            <i class="bi bi-file-earmark-plus me-2"></i>Mulai Buat Jurnal Lengkap
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Generation Output Panel (Initially Hidden) -->
+                    <div id="idea-output-panel" style="display: none;">
+                        <!-- Streaming Logs -->
+                        <div class="card mb-4">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-terminal me-2"></i>Agent Processing Logs</span>
+                                <div class="spinner-border spinner-border-sm text-primary" id="idea-generation-spinner" style="display:none;"></div>
+                            </div>
+                            <div class="card-body">
+                                <div id="idea-generation-logs" class="logs-container p-3 font-monospace bg-light rounded text-dark" style="max-height: 250px; overflow-y: auto;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Result Editor -->
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-journal-richtext me-2"></i>Generated Document</span>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="copyIdeaResult()">
+                                        <i class="bi bi-copy me-1"></i>Copy
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="downloadIdeaResult()">
+                                        <i class="bi bi-download me-1"></i>Download
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <textarea id="idea-output-editor" class="form-control font-monospace p-3 bg-light rounded text-dark" style="height: 500px;"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div> <!-- /tab-idea -->
 
                 <!-- Template Management Modal -->
                 <div class="modal fade" id="templateModal" tabindex="-1">

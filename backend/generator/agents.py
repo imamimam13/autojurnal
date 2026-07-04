@@ -457,7 +457,7 @@ Output ONLY the synthesized findings, organized by theme."""
 
 def _writer_prompt(language: str, section_key: str, theme: str, section_heading: str, research_plan: str, findings: str, word_target: str, previous: str, paper_list: str, has_data: bool = False, user_data: Optional[str] = None) -> str:
     from diagrams.prompts import diagram_instruction
-    diagram_block = diagram_instruction(has_data, language, user_data)
+    diagram_block = diagram_instruction(has_data, language, user_data, content=findings + "\n" + previous)
 
     no_ref = (
         "\n\nPENTING: HANYA gunakan sitasi inline (Penulis, Tahun). "
@@ -489,7 +489,8 @@ ATURAN PENULISAN:
 2. Setiap klaim WAJIB disertai sitasi inline format APA: (Penulis, Tahun)
 3. Tulis kalimat ORISINAL — jangan menyalin dari konteks atau abstrak
 4. Target panjang: sekitar {word_target} kata untuk bagian ini
-5. Output ONLY konten bagian dengan heading ##, tanpa komentar tambahan{diagram_block}{no_ref}"""
+5. VARIASI NARASI & ANTI-REPETISI: JANGAN gunakan kalimat pembuka yang seragam atau repetitif. Hindari memulai paragraf atau kalimat dengan template pasif seperti "Penelitian ini bertujuan untuk...", "Hasil penelitian menunjukkan bahwa...", "Hal ini sejalan dengan penelitian oleh...", atau "Penelitian yang dilakukan oleh (Penulis, Tahun) menemukan...". Tulis klaim ilmiah secara langsung dan sintesis teoretis yang aktif, variasikan panjang kalimat, serta batasi kata hubung transisi berulang ("Selain itu,", "Lebih lanjut,", "Dalam konteks ini,") di awal paragraf/kalimat.
+6. Output ONLY konten bagian dengan heading ##, tanpa komentar tambahan{diagram_block}{no_ref}"""
     else:
         base = f"""Research Theme: "{theme}"
 Section to write: {section_heading}
@@ -510,7 +511,8 @@ WRITING RULES:
 2. Every claim MUST have an inline APA citation: (Author, Year)
 3. Write ORIGINAL sentences — do not copy from context or abstracts
 4. Target length: approximately {word_target} words for this section
-5. Output ONLY the section content with ## headings, no extra commentary{diagram_block}{no_ref}"""
+5. NARRATIVE VARIETY & ANTI-REPETITION: DO NOT use repetitive sentence starters or narrative clichés. Avoid beginning paragraphs or sentences with robotic templates like "This study aims to...", "The results of this study show...", "This is in line with...", or "Research conducted by (Author, Year) found...". Write direct, active theoretical claims, vary sentence lengths, and limit transition overuse ("Furthermore,", "In addition,", "Moreover,") at the start of sentences/paragraphs.
+6. Output ONLY the section content with ## headings, no extra commentary{diagram_block}{no_ref}"""
 
     if section_key == "title_abstract":
         base += (
@@ -977,6 +979,7 @@ def _lead_layout_prompt(
             "- Gunakan DATA ASLI dari naskah — JANGAN buat data palsu.",
             "- Jangan hapus atau ubah teks yang sudah ada — hanya SELIPKAN blok diagram/tabel.",
             "- Outputkan SELURUH naskah (teks + visual yang disisipkan), tanpa komentar tambahan.",
+            "- PENTING: JSON di blok ---DIAGRAM--- HARUS valid — periksa koma, tanda kutip, dan kurung.",
         ]
         if user_block:
             parts.append(user_block)
@@ -1014,13 +1017,14 @@ def _lead_layout_prompt(
         "   ---END DIAGRAM---",
         "   Types: flowchart, concept_map",
         "",
-        "3. **Markdown Tables** for tabular data.",
-        "",
-        "Rules:",
-        "- ONLY add visuals when they truly improve understanding.",
-        "- Use REAL data from the text — do NOT fabricate.",
-        "- Do NOT delete or alter existing text — only INSERT diagram/table blocks.",
-        "- Output the ENTIRE text (with inserted visuals), no extra commentary.",
+            "3. **Markdown Tables** for tabular data.",
+            "",
+            "Rules:",
+            "- ONLY add visuals when they truly improve understanding.",
+            "- Use REAL data from the text — do NOT fabricate.",
+            "- Do NOT delete or alter existing text — only INSERT diagram/table blocks.",
+            "- Output the ENTIRE text (with inserted visuals), no extra commentary.",
+            "- IMPORTANT: JSON in ---DIAGRAM--- blocks MUST be valid — check commas, quotes, and brackets.",
     ]
     if user_block:
         parts.append(user_block)
@@ -1040,6 +1044,9 @@ async def generate_multi_agent(
     user_data: Optional[str] = None,
     log_queue: Optional[asyncio.Queue] = None,
     previous_works_ctx: str = "",
+    draft_idea: Optional[str] = None,
+    paradigm: Optional[str] = None,
+    analysis_method: Optional[str] = None,
 ) -> tuple[str, dict]:
 
     async def log(agent: str, msg: str, detail: str = ""):
@@ -1067,19 +1074,46 @@ async def generate_multi_agent(
     paper_list = _get_paper_list(papers)
 
     # ---- Step 0: Methodology Analyst (runs once) ----
-    await log("Methodology Analyst", "Menentukan paradigma dan metode analisis...")
-    methodology_sys = SYSTEM_PROMPTS["methodology_analyst"][lang]
-    methodology_task = _methodology_prompt(lang, theme, paper_list, template)
-    methodology_context = await tracker.run(provider, methodology_sys, methodology_task)
-    await log("Methodology Analyst", f"Selesai ({len(methodology_context)} chars)")
+    if paradigm and paradigm.lower() != "auto" and analysis_method and analysis_method.lower() != "auto":
+        await log("Methodology Analyst", f"Menggunakan paradigma '{paradigm}' dan metode '{analysis_method}' yang Anda pilih.")
+        if lang == "id":
+            methodology_context = (
+                f"Pendekatan: Kualitatif\n"
+                f"Paradigma: {paradigm}\n"
+                f"Metode Analisis: {analysis_method}"
+            )
+        else:
+            methodology_context = (
+                f"Approach: Qualitative\n"
+                f"Paradigm: {paradigm}\n"
+                f"Analysis Method: {analysis_method}"
+            )
+    else:
+        await log("Methodology Analyst", "Menentukan paradigma dan metode analisis...")
+        methodology_sys = SYSTEM_PROMPTS["methodology_analyst"][lang]
+        
+        task_prefix = ""
+        if paradigm and paradigm.lower() != "auto":
+            task_prefix += f"PENTING: Anda HARUS menggunakan Paradigma: {paradigm}.\n" if lang == "id" else f"IMPORTANT: You MUST use Paradigm: {paradigm}.\n"
+        if analysis_method and analysis_method.lower() != "auto":
+            task_prefix += f"PENTING: Anda HARUS menggunakan Metode Analisis: {analysis_method}.\n" if lang == "id" else f"IMPORTANT: You MUST use Analysis Method: {analysis_method}.\n"
 
-    # Build template + methodology + previous-works context
+        methodology_task = task_prefix + _methodology_prompt(lang, theme, paper_list, template)
+        methodology_context = await tracker.run(provider, methodology_sys, methodology_task)
+    
+    await log("Methodology Analyst", f"Selesai (Metodologi: {methodology_context.replace('\n', ', ')})")
+
+    # Build template + previous-works context (exclude methodology from global context)
     template_ctx = ""
     if template:
         template_ctx = _format_template_sections(template, lang) + _format_template_constraints(template, lang) + "\n\n"
-    template_ctx += f"METODOLOGI PENELITIAN:\n{methodology_context}\n\n" if lang == "id" else f"RESEARCH METHODOLOGY:\n{methodology_context}\n\n"
     if previous_works_ctx:
         template_ctx += previous_works_ctx + "\n\n"
+    if draft_idea:
+        if lang == "id":
+            template_ctx += f"DRAFT IDE PENULIS (Harus dikembangkan dan dijadikan landasan utama penulisan):\n{draft_idea}\n\n"
+        else:
+            template_ctx += f"AUTHOR'S DRAFT IDEA (Must be expanded and serve as the core foundation of the text):\n{draft_idea}\n\n"
 
     all_content = ""
     prev_titles = ""
@@ -1087,6 +1121,18 @@ async def generate_multi_agent(
     for section_key in section_order:
         heading = headings[section_key]
         await log("Pipeline", f"Memproses bagian: {section_key} ({heading})")
+
+        # Append methodology only to the Methods section
+        section_template_ctx = template_ctx
+        is_method_section = section_key == "method" or "metode" in heading.lower() or "method" in heading.lower()
+        if is_method_section:
+            section_template_ctx += f"METODOLOGI PENELITIAN:\n{methodology_context}\n\n" if lang == "id" else f"RESEARCH METHODOLOGY:\n{methodology_context}\n\n"
+        else:
+            # For other sections, add a strong negative constraint instruction
+            if lang == "id":
+                section_template_ctx += "PENTING: JANGAN membahas detail metodologi, pendekatan, paradigma (seperti konstruktivisme/positivisme/post-modernisme), atau metode analisis di bagian ini. Fokuslah sepenuhnya pada topik bagian ini saja.\n\n"
+            else:
+                section_template_ctx += "IMPORTANT: DO NOT discuss detailed methodology, approaches, paradigms (like constructivism/positivism/post-modernism), or analysis methods in this section. Focus entirely on the topic of this section.\n\n"
 
         query_template = RAG_QUERIES.get(section_key)
         if query_template:
@@ -1098,35 +1144,35 @@ async def generate_multi_agent(
 
         # 1. Lead Researcher
         await log("Lead Researcher", "Membuat rencana penelitian...")
-        researcher_sys = template_ctx + SYSTEM_PROMPTS["lead_researcher"][lang]
+        researcher_sys = section_template_ctx + SYSTEM_PROMPTS["lead_researcher"][lang]
         task = _researcher_prompt(lang, section_key, theme, heading, rag, prev_titles)
         research_plan = await tracker.run(provider, researcher_sys, task)
         await log("Lead Researcher", f"Rencana selesai ({len(research_plan)} chars)")
 
         # 2. Source Reviewer
         await log("Source Reviewer", "Mensintesis temuan dari sumber...")
-        reviewer_sys = template_ctx + SYSTEM_PROMPTS["source_reviewer"][lang]
+        reviewer_sys = section_template_ctx + SYSTEM_PROMPTS["source_reviewer"][lang]
         task = _reviewer_prompt(lang, section_key, theme, heading, research_plan, rag)
         findings = await tracker.run(provider, reviewer_sys, task)
         await log("Source Reviewer", f"Sintesis selesai ({len(findings)} chars)")
 
         # 3. Lead Writer (first draft)
         await log("Lead Writer", "Menulis draf pertama...")
-        writer_sys = template_ctx + SYSTEM_PROMPTS["lead_writer"][lang]
+        writer_sys = section_template_ctx + SYSTEM_PROMPTS["lead_writer"][lang]
         task = _writer_prompt(lang, section_key, theme, heading, research_plan, findings, word_target, prev_titles, paper_list, has_data, user_data)
         section_content = await tracker.run(provider, writer_sys, task)
         await log("Lead Writer", f"Draf selesai ({len(section_content)} chars)")
 
         # 3b. Lead Storyteller (enrich descriptiveness)
         await log("Lead Storyteller", "Memperkaya dengan elemen naratif...")
-        story_sys = template_ctx + SYSTEM_PROMPTS["lead_story"][lang]
+        story_sys = section_template_ctx + SYSTEM_PROMPTS["lead_story"][lang]
         story_task = _lead_story_prompt(lang, theme, heading, section_content)
         section_content_storied = await tracker.run(provider, story_sys, story_task)
         await log("Lead Storyteller", f"Pengayaan selesai ({len(section_content_storied)} chars)")
 
         # 4. Peer Reviewer
         await log("Peer Reviewer", "Mengevaluasi naskah...")
-        peer_sys = template_ctx + SYSTEM_PROMPTS["peer_reviewer"][lang]
+        peer_sys = section_template_ctx + SYSTEM_PROMPTS["peer_reviewer"][lang]
         task = _peer_review_prompt(lang, theme, heading, research_plan, findings, section_content_storied)
         peer_review = await tracker.run(provider, peer_sys, task)
         await log("Peer Reviewer", f"Review selesai ({len(peer_review)} chars)")

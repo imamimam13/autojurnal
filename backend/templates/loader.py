@@ -92,10 +92,28 @@ def _extract_text_from_pdf(path: str) -> str:
 
 def _extract_text_from_docx(path: str) -> str:
     doc = docx.Document(path)
-    text = "\n".join(
-        p.text for p in doc.paragraphs if p.text.strip()
-    )
-    return text.strip()
+    parts = []
+    for p in doc.paragraphs:
+        if p.text.strip():
+            parts.append(p.text)
+    
+    # Also extract text from tables
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = []
+            for cell in row.cells:
+                ct = cell.text.strip()
+                if ct:
+                    row_text.append(ct)
+            # Deduplicate adjacent cells due to merged cells
+            dedup_row = []
+            for val in row_text:
+                if not dedup_row or dedup_row[-1] != val:
+                    dedup_row.append(val)
+            if dedup_row:
+                parts.append(" | ".join(dedup_row))
+                
+    return "\n".join(parts).strip()
 
 
 def parse_upload(file_path: str) -> Optional[str]:

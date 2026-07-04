@@ -11,7 +11,7 @@ async def scrape_pdf(pdf_url: str, timeout: int = 60) -> str | None:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
                 resp = await client.get(pdf_url)
                 resp.raise_for_status()
-            doc = fitx.open(stream=resp.content, filetype="pdf")
+            doc = fitz.open(stream=resp.content, filetype="pdf")
             text = "".join(page.get_text() for page in doc)
             doc.close()
             return text.strip() or None

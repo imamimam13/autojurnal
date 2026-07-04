@@ -40,6 +40,16 @@ app = FastAPI(title=settings.app_name, version="1.0.0")
 app.include_router(research_router)
 
 
+def clean_query(q: str) -> str:
+    if not q:
+        return ""
+    q = q.replace("**", "").replace("*", "").replace("__", "").replace("_", "")
+    q = q.replace(":", " ").replace("-", " ").replace(";", " ")
+    for char in '"\'()[]{}?,.!':
+        q = q.replace(char, "")
+    return " ".join(q.split())
+
+
 def format_reference(p: Paper) -> str:
     if len(p.authors) == 0:
         author_str = "Unknown"
@@ -126,10 +136,12 @@ async def _setup_rag(papers: list[Paper], paper_hash: str):
                 "year": p.year,
                 "source": p.source,
             })
+        from rag.chunker import chunk_text
         for p in scrape_targets:
             original_idx = papers.index(p)
             if original_idx not in scraped_indices and p.abstract:
-                store.add_chunks(original_idx, [p.abstract], {
+                p_chunks = chunk_text(p.abstract)
+                store.add_chunks(original_idx, p_chunks, {
                     "title": p.title,
                     "authors": p.authors,
                     "year": p.year,
@@ -138,7 +150,8 @@ async def _setup_rag(papers: list[Paper], paper_hash: str):
         for p in abstract_targets:
             if p.abstract:
                 original_idx = papers.index(p)
-                store.add_chunks(original_idx, [p.abstract], {
+                p_chunks = chunk_text(p.abstract)
+                store.add_chunks(original_idx, p_chunks, {
                     "title": p.title,
                     "authors": p.authors,
                     "year": p.year,
@@ -217,6 +230,14 @@ class GenerateRequest(BaseModel):
     do_research: bool = False
     research_job_id: Optional[str] = None
     library: bool = Field(default=False, description="Check previous works on similar themes to avoid duplication")
+    draft_idea: Optional[str] = Field(default=None, description="Extracted draft idea to guide the writing agents")
+    paradigm: Optional[str] = Field(default=None, description="Preferred qualitative research paradigm")
+    analysis_method: Optional[str] = Field(default=None, description="Preferred qualitative research analysis method")
+
+
+class IdeaParseResponse(BaseModel):
+    draft_idea: str
+    search_query: str
 
 
 class RestructureParseRequest(BaseModel):
@@ -363,7 +384,7 @@ async def search_papers(req: SearchRequest):
         from_year = current_year - req.year_range
 
     papers = await searcher.search(
-        query=req.theme,
+        query=clean_query(req.theme),
         from_year=from_year,
         to_year=to_year,
     )
@@ -475,7 +496,7 @@ async def generate_journal(req: GenerateRequest):
                 provider=provider, papers=papers, theme=req.theme,
                 language=req.language, num_chapters=req.num_chapters,
                 template=template, has_data=req.has_data, user_data=req.user_data,
-                previous_works_ctx=prev_works_ctx,
+                previous_works_ctx=prev_works_ctx, draft_idea=req.draft_idea,
             )
             token_usage["estimated"] = True
         elif req.multi_agent:
@@ -484,7 +505,8 @@ async def generate_journal(req: GenerateRequest):
                 provider=provider, papers=papers, theme=req.theme,
                 language=req.language, target_length=req.target_length,
                 template=template, has_data=req.has_data, user_data=req.user_data,
-                previous_works_ctx=prev_works_ctx,
+                previous_works_ctx=prev_works_ctx, draft_idea=req.draft_idea,
+                paradigm=req.paradigm, analysis_method=req.analysis_method,
             )
             token_usage["estimated"] = True
         else:
@@ -506,6 +528,7 @@ async def generate_journal(req: GenerateRequest):
                     papers, req.language, req.theme, req.target_length,
                     part=part, num_parts=num_parts, previous_content=previous_content,
                     rag_context=rag_context, has_data=req.has_data, user_data=req.user_data,
+                    draft_idea=req.draft_idea,
                 )
                 part_text = await provider.generate(prompt, system_prompt=system_prompt)
 
@@ -552,9 +575,6 @@ async def generate_journal(req: GenerateRequest):
         print(f"[Librarian] Save error: {e}")
 
     return GenerateResponse(journal=journal, provider_used=provider.display_name, token_usage=token_usage)
-
-
-@app.post("/api/generate/stream")
 
 
 @app.post("/api/generate/stream")
@@ -641,6 +661,7 @@ async def generate_journal_stream(req: GenerateRequest):
             log_queue=log_queue,
             previous_works_ctx=prev_works_ctx,
             do_library=req.library,
+            draft_idea=req.draft_idea,
         ))
 
         while True:
@@ -665,7 +686,7 @@ async def generate_journal_stream(req: GenerateRequest):
 async def _run_generation(
     provider, papers, theme, language, target_length, num_chapters,
     mode, multi_agent, template, has_data, user_data, log_queue,
-    previous_works_ctx="", do_library=False,
+    previous_works_ctx="", do_library=False, draft_idea=None,
 ):
     try:
         prev_ctx = previous_works_ctx
@@ -676,6 +697,7 @@ async def _run_generation(
                 language=language, num_chapters=num_chapters,
                 template=template, has_data=has_data, user_data=user_data,
                 log_queue=log_queue, previous_works_ctx=prev_ctx,
+                draft_idea=draft_idea,
             )
             token_usage["estimated"] = True
         elif multi_agent:
@@ -684,6 +706,8 @@ async def _run_generation(
                 language=language, target_length=target_length,
                 template=template, has_data=has_data, user_data=user_data,
                 log_queue=log_queue, previous_works_ctx=prev_ctx,
+                draft_idea=draft_idea,
+                paradigm=req.paradigm, analysis_method=req.analysis_method,
             )
             token_usage["estimated"] = True
         else:
@@ -707,6 +731,7 @@ async def _run_generation(
                     papers, language, theme, target_length,
                     part=part, num_parts=num_parts, previous_content=previous_content,
                     rag_context=rag_context, has_data=has_data, user_data=user_data,
+                    draft_idea=draft_idea,
                 )
                 part_text = await provider.generate(prompt, system_prompt=system_prompt)
 
@@ -792,6 +817,131 @@ async def _run_generation(
         await log_queue.put({"type": "error", "message": str(e)})
 
 
+@app.post("/api/generate/idea/parse", response_model=IdeaParseResponse)
+async def parse_idea_source(
+    file: Optional[UploadFile] = File(None),
+    file_url: Optional[str] = Form(None),
+    language: str = Form("id"),
+    provider: str = Form("ollama"),
+    provider_model: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
+    provider_base_url: Optional[str] = Form(None),
+):
+    if file:
+        raw = await file.read()
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        if ext in (".pdf", ".docx"):
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            try:
+                tmp.write(raw)
+                tmp.close()
+                text = parse_upload(tmp.name) or ""
+            finally:
+                os.unlink(tmp.name)
+        else:
+            text = raw.decode("utf-8", errors="replace")
+    elif file_url:
+        result = await resolve_link(file_url)
+        if not result:
+            raise HTTPException(status_code=400, detail="Could not resolve link or download file")
+        content = result["content"]
+        if result["ext"] in (".pdf", ".docx"):
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=result["ext"])
+            try:
+                tmp.write(content)
+                tmp.close()
+                parsed = parse_upload(tmp.name)
+                text = parsed or ""
+            finally:
+                os.unlink(tmp.name)
+        else:
+            text = content.decode("utf-8", errors="replace")
+    else:
+        raise HTTPException(status_code=400, detail="Provide a file or a Google Drive/Docs link")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Extracted text is empty")
+
+    provider_kwargs = {}
+    if provider_model:
+        provider_kwargs["model"] = provider_model
+    if api_key:
+        provider_kwargs["api_key"] = api_key
+    if provider_base_url:
+        provider_kwargs["base_url"] = provider_base_url
+
+    llm = get_provider(provider, **provider_kwargs)
+    if not llm:
+        raise HTTPException(status_code=400, detail=f"LLM provider '{provider}' not available")
+
+    system_prompt = (
+        "Anda adalah asisten riset akademik. Tugas Anda adalah membantu merangkum ide draf naskah kasar penulis "
+        "dan mengekstrak kata kunci pencarian referensi ilmiah terpopuler/terbaru."
+        if language == "id"
+        else "You are an academic research assistant. Your task is to summarize the author's rough draft manuscript ideas "
+        "and extract search keywords to query scientific literature databases."
+    )
+
+    prompt = (
+        f"Berikut adalah draf kasar ide penelitian dari penulis:\n\n{text[:100000]}\n\n"
+        f"Berdasarkan draf kasar ide di atas, harap buat analisis berupa:\n"
+        f"1. Rangkuman terperinci namun padat mengenai ide/konsep inti dari draf kasar tersebut untuk dijadikan pedoman pembuatan naskah akademik (maksimal 400 kata).\n"
+        f"2. Rekomendasi query/topik pencarian yang dioptimalkan untuk mencari referensi ilmiah terpopuler/terbaru terkait ide tersebut di database seperti OpenAlex (berupa 3-8 kata kunci ringkas dalam bahasa Inggris, contoh: 'artificial intelligence radiology lung cancer').\n\n"
+        f"Anda HARUS mengembalikan jawaban HANYA dalam format JSON sebagai berikut:\n"
+        f"{{\n"
+        f"  \"draft_idea\": \"[Tulis rangkuman ide di sini]\",\n"
+        f"  \"search_query\": \"[Tulis query pencarian di sini]\"\n"
+        f"}}\n\n"
+        f"PENTING: Jangan sertakan komentar teks apa pun di luar JSON tersebut!"
+    )
+
+    response_text = ""
+    try:
+        response_text = await llm.generate(prompt, system_prompt=system_prompt)
+        s = response_text.strip()
+        if s.startswith("```"):
+            first_nl = s.find("\n")
+            if first_nl != -1:
+                s = s[first_nl + 1:]
+                if s.endswith("```"):
+                    s = s[:-3]
+            s = s.strip()
+        
+        data = json.loads(s)
+        draft_idea = data.get("draft_idea", "").strip()
+        search_query = clean_query(data.get("search_query", ""))
+    except Exception as e:
+        print(f"[ParseIdea] LLM parse error: {e}. Raw response: {response_text}")
+        draft_idea = text[:1500].strip()
+        search_query = clean_query(" ".join(text.split()[:5]))
+
+    return IdeaParseResponse(draft_idea=draft_idea, search_query=search_query)
+
+
+@app.post("/api/parse-file")
+async def parse_file(file: UploadFile = File(...)):
+    if file.filename is None:
+        raise HTTPException(status_code=400, detail="No file provided")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in (".pdf", ".docx", ".txt", ".md"):
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}. Supported: .pdf, .docx, .txt, .md")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+    try:
+        content = await file.read()
+        tmp.write(content)
+        tmp.close()
+        text = parse_upload(tmp.name)
+        if not text:
+            raise HTTPException(status_code=400, detail="Could not extract text from file")
+    finally:
+        os.unlink(tmp.name)
+
+    return {"text": text, "filename": file.filename}
+
+
 @app.post("/api/restructure/parse", response_model=RestructureParseResponse)
 async def parse_restructure_source(file: Optional[UploadFile] = File(None), file_url: Optional[str] = None):
     if file:
@@ -813,17 +963,19 @@ async def parse_restructure_source(file: Optional[UploadFile] = File(None), file
         result = await resolve_link(file_url)
         if not result:
             raise HTTPException(status_code=400, detail="Could not resolve link or download file")
-        text = result["text"]
+        content = result["content"]
         if result["ext"] in (".pdf", ".docx"):
             import tempfile
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=result["ext"])
             try:
-                tmp.write(text.encode("utf-8"))
+                tmp.write(content)
                 tmp.close()
                 parsed = parse_upload(tmp.name)
-                text = parsed or text
+                text = parsed or ""
             finally:
                 os.unlink(tmp.name)
+        else:
+            text = content.decode("utf-8", errors="replace")
     else:
         raise HTTPException(status_code=400, detail="Provide a file or a Google Drive/Docs link")
 
@@ -895,7 +1047,8 @@ TUGAS ANDA:
 4. Jika reviewer meminta tambahan konten, tambahkan dengan gaya yang konsisten.
 5. PENTING: HANYA gunakan sitasi inline (Penulis, Tahun). JANGAN cantumkan judul jurnal, volume, DOI, atau URL di badan dokumen.
 6. Outputkan SELURUH dokumen yang sudah direvisi, bukan hanya bagian yang berubah.
-7. JANGAN tambahkan komentar atau penjelasan di luar konten dokumen."""
+7. VARIASI NARASI & ANTI-REPETISI: JANGAN gunakan kalimat pembuka yang seragam atau repetitif. Hindari memulai paragraf atau kalimat dengan template pasif seperti "Penelitian ini bertujuan untuk...", "Hasil penelitian menunjukkan bahwa...", "Hal ini sejalan dengan penelitian oleh...", atau "Penelitian yang dilakukan oleh (Penulis, Tahun) menemukan...". Tulis klaim ilmiah secara langsung dan sintesis teoretis yang aktif, variasikan panjang kalimat, serta batasi kata hubung transisi berulang ("Selain itu,", "Lebih lanjut,", "Dalam konteks ini,") di awal paragraf/kalimat.
+8. JANGAN tambahkan komentar atau penjelasan di luar konten dokumen."""
 
 _revise_prompt_en = """You are an academic assistant that revises documents based on human reviewer feedback.
 
@@ -912,7 +1065,8 @@ YOUR TASK:
 4. If the reviewer requests additional content, add it in a consistent style.
 5. IMPORTANT: Only use inline citations (Author, Year). Do NOT include journal name, volume, DOI, or URLs in the document body.
 6. Output the ENTIRE revised document, not just the changed sections.
-7. Do NOT add commentary or explanations outside the document content."""
+7. NARRATIVE VARIETY & ANTI-REPETITION: DO NOT use repetitive sentence starters or narrative clichés. Avoid beginning paragraphs or sentences with robotic templates like "This study aims to...", "The results of this study show...", "This is in line with...", or "Research conducted by (Author, Year) found...". Write direct, active theoretical claims, vary sentence lengths, and limit transition overuse ("Furthermore,", "In addition,", "Moreover,") at the start of sentences/paragraphs.
+8. Do NOT add commentary or explanations outside the document content."""
 
 
 def _build_revise_prompt(source_text: str, review_text: str, lang: str) -> str:
@@ -931,7 +1085,44 @@ async def parse_reviewed_document(file: Optional[UploadFile] = File(None), file_
             resolved = await resolve_link(file_url)
             if not resolved:
                 raise HTTPException(status_code=400, detail="Could not resolve link")
-            return ReviseParseResponse(source_text=resolved["text"], review_text="", comment_count=0)
+            
+            content = resolved["content"]
+            ext = resolved["ext"]
+            
+            if ext == ".docx":
+                with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+                    tmp.write(content)
+                    tmp_path = tmp.name
+                try:
+                    doc = DocxDocument(tmp_path)
+                    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+                    source_text = "\n\n".join(paragraphs)
+                    
+                    review_parts = []
+                    for comment in doc.comments:
+                        author = comment.author or "Reviewer"
+                        review_parts.append(f"{author}: {comment.text}")
+                    review_text = "\n\n".join(review_parts) if review_parts else ""
+                    comment_count = len(review_parts)
+                finally:
+                    os.unlink(tmp_path)
+            elif ext == ".pdf":
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    tmp.write(content)
+                    tmp_path = tmp.name
+                try:
+                    text = parse_upload(tmp_path) or ""
+                finally:
+                    os.unlink(tmp_path)
+                source_text = text
+                review_text = ""
+                comment_count = 0
+            else:
+                source_text = content.decode("utf-8", errors="replace")
+                review_text = ""
+                comment_count = 0
+                
+            return ReviseParseResponse(source_text=source_text, review_text=review_text, comment_count=comment_count)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to fetch from link: {e}")
 

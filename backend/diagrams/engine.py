@@ -1,3 +1,4 @@
+import ast
 import io
 import json
 import base64
@@ -10,9 +11,94 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 DIAGRAM_RE = re.compile(
-    r"---DIAGRAM---\s*\n(.*?)---END DIAGRAM---",
+    r"---DIAGRAM---\s*(.*?)---END DIAGRAM---",
     re.DOTALL,
 )
+
+
+def _fix_invalid_escapes(s: str) -> str:
+    """Strip backslash from invalid JSON escape sequences
+    (\\R, \\d, \\X, etc.) that LLMs often produce inside
+    JSON strings (e.g. from LaTeX notation)."""
+    valid = {'"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'}
+    chars = []
+    i = 0
+    while i < len(s):
+        if s[i] == '\\' and i + 1 < len(s):
+            nxt = s[i + 1]
+            if nxt in valid:
+                chars.append(s[i])
+                chars.append(nxt)
+            else:
+                chars.append(nxt)   # drop backslash
+            i += 2
+        else:
+            chars.append(s[i])
+            i += 1
+    return ''.join(chars)
+
+
+def _try_fix_json(raw: str) -> Optional[str]:
+    """Attempt to repair common LLM JSON mistakes: trailing
+    commas, single quotes, missing quotes around keys, comments,
+    and invalid escape sequences."""
+    s = raw.strip()
+
+    # Fix invalid escape sequences first (before any parsing)
+    s = _fix_invalid_escapes(s)
+
+    # Strip markdown code fences if LLM wrapped JSON in them
+    if s.startswith("```"):
+        first_nl = s.find("\n")
+        if first_nl != -1:
+            s = s[first_nl + 1:]
+            # Remove closing fence
+            if s.endswith("```"):
+                s = s[:-3]
+        s = s.strip()
+
+    # Strip JS-style line comments
+    s = re.sub(r"(?m)\s*//[^\n]*", "", s)
+    # Strip JS-style block comments
+    s = re.sub(r"/\*.*?\*/", "", s, flags=re.DOTALL)
+
+    # Remove trailing commas before ] or }
+    s = re.sub(r",\s*([}\]])", r"\1", s)
+
+    # If still valid, return as-is
+    try:
+        json.loads(s)
+        return s
+    except json.JSONDecodeError:
+        pass
+
+    # Replace single quotes → double quotes (careful: don't touch
+    # apostrophes inside words — only quote-like patterns)
+    # Strategy: replace ' at start/end of a JSON token
+    # Simpler: try ast.literal_eval for Python-style dicts
+    try:
+        result = ast.literal_eval(s)
+        if isinstance(result, dict):
+            return json.dumps(result)
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        pass
+
+    # Aggressive: unquoted keys (common LLM mistake: {type: "bar"})
+    s2 = re.sub(r"(^|[\s{,])([a-zA-Z_]\w*)(\s*:)", r'\1"\2"\3', s)
+    if s2 != s:
+        try:
+            json.loads(s2)
+            return s2
+        except json.JSONDecodeError:
+            pass
+        try:
+            result = ast.literal_eval(s2)
+            if isinstance(result, dict):
+                return json.dumps(result)
+        except (SyntaxError, ValueError, MemoryError, RecursionError):
+            pass
+
+    return None
 
 CONCEPTUAL_TYPES = {"flowchart", "concept_map"}
 
@@ -42,12 +128,12 @@ _MERMAID_SHAPES = {
     "rectangle": "[{label}]",
     "ellipse": "({label})",
     "oval": "({label})",
-    "diamond": "{{{label}}}",
-    "rhombus": "{{{label}}}",
+    "diamond": "{{label}}",
+    "rhombus": "{{label}}",
     "circle": "(({label}))",
-    "parallelogram": "[/{label}\\]",
-    "hexagon": "{{{{label}}}}",
-    "trapezoid": "[/{label}]",
+    "parallelogram": "[/{label}/]",
+    "hexagon": "{{{label}}}",
+    "trapezoid": "[/{label}\\]",
 }
 
 
@@ -318,12 +404,27 @@ RENDERERS = {
 def extract_and_render_diagrams(markdown_text: str) -> str:
     def _replace(match):
         raw = match.group(1).strip()
+
+        # Try as-is, then repair if needed
+        data = None
+        parse_err = None
+        cleaned = _fix_invalid_escapes(raw)
         try:
-            data = json.loads(raw)
+            data = json.loads(cleaned)
         except json.JSONDecodeError as e:
-            msg = f"[Diagram] JSON parse error: {e}"
+            parse_err = e
+            fixed = _try_fix_json(cleaned)
+            if fixed is not None:
+                try:
+                    data = json.loads(fixed)
+                    print(f"[Diagram] Repaired malformed JSON")
+                except json.JSONDecodeError:
+                    pass
+
+        if data is None:
+            msg = f"[Diagram] JSON parse error: {parse_err}"
             print(msg)
-            return f"*[Diagram: invalid JSON — {e}]*"
+            return f"*[Diagram: invalid JSON — {parse_err}]*"
         dtype = data.get("type", "")
         renderer = RENDERERS.get(dtype)
         if not renderer:

@@ -35,7 +35,7 @@ class OllamaProvider(LLMProvider):
         retries = 3
         url = f"{self.base_url}/api/generate"
         print(f"[Ollama] POST {url}  model={self.model!r}")
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
             for attempt in range(retries):
                 try:
                     resp = await client.post(

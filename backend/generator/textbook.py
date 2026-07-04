@@ -237,7 +237,7 @@ Output ONLY the extracted material, organized by topic."""
 
 def _chapter_writer_prompt(language: str, theme: str, chapter_num: int, chapter_title: str, research_plan: str, findings: str, previous_content: str, paper_list: str, all_chapter_titles: str, subsections: Optional[list[str]] = None, has_data: bool = False, user_data: Optional[str] = None) -> str:
     from diagrams.prompts import diagram_instruction
-    diag = diagram_instruction(has_data, language, user_data)
+    diag = diagram_instruction(has_data, language, user_data, content=findings + "\n" + previous_content)
     no_ref = (
         "\n\nPENTING: HANYA gunakan sitasi inline (Penulis, Tahun). "
         "JANGAN pernah mencantumkan judul jurnal, volume, nomor, halaman, DOI, atau URL di badan bab. "
@@ -423,6 +423,7 @@ async def generate_textbook(
     user_data: Optional[str] = None,
     log_queue: Optional[asyncio.Queue] = None,
     previous_works_ctx: str = "",
+    draft_idea: Optional[str] = None,
 ) -> tuple[str, dict]:
 
     async def log(agent: str, msg: str, detail: str = ""):
@@ -465,6 +466,11 @@ async def generate_textbook(
     template_ctx += f"METODOLOGI PENELITIAN:\n{methodology_context}\n\n" if lang == "id" else f"RESEARCH METHODOLOGY:\n{methodology_context}\n\n"
     if previous_works_ctx:
         template_ctx += previous_works_ctx + "\n\n"
+    if draft_idea:
+        if lang == "id":
+            template_ctx += f"DRAFT IDE PENULIS (Harus dikembangkan dan dijadikan landasan utama penulisan):\n{draft_idea}\n\n"
+        else:
+            template_ctx += f"AUTHOR'S DRAFT IDEA (Must be expanded and serve as the core foundation of the text):\n{draft_idea}\n\n"
 
     # ---- Step 1: Curriculum Designer ----
     await log("Curriculum Designer", f"Mendesain kurikulum untuk {num_chapters} bab...")

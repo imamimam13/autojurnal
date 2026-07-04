@@ -26,7 +26,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         saveApiKeyToBackend(provider, apiKey);
     });
 
-    document.querySelectorAll("#input-card input, #input-card select").forEach((el) => {
+    document.querySelectorAll("#input-card input, #input-card select, #tab-idea select, #tab-idea input").forEach((el) => {
         el.addEventListener("change", saveSettings);
         el.addEventListener("input", saveSettings);
     });
@@ -104,6 +104,7 @@ function saveSettings() {
         "openalex-api-key", "llm-api-key", "provider-model", "provider-base-url",
         "theme", "paper-title", "year-range", "max-papers", "language", "provider",
         "multi-agent", "has-data", "user-data", "mode", "num-chapters", "template-select",
+        "paradigm", "analysis-method", "idea-paradigm", "idea-analysis-method",
     ];
     const data = {};
     keys.forEach((id) => {
@@ -583,6 +584,8 @@ async function generateJournal() {
         do_research: doResearch,
         research_job_id: researchJobId,
         library: useLibrary,
+        paradigm: document.getElementById("paradigm").value,
+        analysis_method: document.getElementById("analysis-method").value,
     };
     if (isTextbook) body.num_chapters = numChapters;
 
@@ -731,11 +734,10 @@ function stripMarkdown(text) {
 }
 
 function _cleanHtmlClipboard(html) {
-    // Strip base64 images (bloat clipboard, fail paste)
-    // Keep Markdown tables (converted to <table> by marked.js) — Word/Docs can render them
+    // Keep base64 diagram images (so they can be pasted directly into MS Word / Google Docs)
+    // Convert mermaid divs into styled pre/code blocks so the mermaid code is preserved when pasting as HTML
     return html
-        .replace(/<img[^>]*src="data:image[^>]*>/gi, "")
-        .replace(/<div class="mermaid">[\s\S]*?<\/div>/gi, "");
+        .replace(/<div class="mermaid">([\s\S]*?)<\/div>/gi, '<pre style="background:#f4f4f5; padding:12px; border:2px solid #000000; border-radius:8px; font-family:monospace; color:#18181b; margin:15px 0; box-shadow:3px 3px 0px #000000;"><strong>[Mermaid Diagram Code]</strong><br>$1</pre>');
 }
 
 function _copyFallback(text) {
@@ -920,10 +922,14 @@ const CATEGORY_COLORS = {
 function populateTemplateSelect() {
     const sel = document.getElementById("template-select");
     const rsel = document.getElementById("restructure-template-select");
+    const isel = document.getElementById("idea-template");
     const current = sel.value;
     sel.innerHTML = '<option value="">Default (no template)</option>';
     if (rsel) {
         rsel.innerHTML = '<option value="">Select a template...</option>';
+    }
+    if (isel) {
+        isel.innerHTML = '<option value="">Default (IMRAD)</option>';
     }
     const grouped = {};
     templates.forEach((t) => {
@@ -948,6 +954,10 @@ function populateTemplateSelect() {
         if (rsel) {
             const rog = og.cloneNode(true);
             rsel.appendChild(rog);
+        }
+        if (isel) {
+            const iog = og.cloneNode(true);
+            isel.appendChild(iog);
         }
     });
     // restore selection
@@ -1128,14 +1138,19 @@ function showTab(tab) {
     document.getElementById("tab-restructure").style.display = tab === "restructure" ? "" : "none";
     document.getElementById("tab-review").style.display = tab === "review" ? "" : "none";
     document.getElementById("tab-translate").style.display = tab === "translate" ? "" : "none";
+    document.getElementById("tab-idea").style.display = tab === "idea" ? "" : "none";
+
     document.getElementById("tab-generate-btn").classList.toggle("active", tab === "generate");
     document.getElementById("tab-restructure-btn").classList.toggle("active", tab === "restructure");
     document.getElementById("tab-review-btn").classList.toggle("active", tab === "review");
     document.getElementById("tab-translate-btn").classList.toggle("active", tab === "translate");
+    document.getElementById("tab-idea-btn").classList.toggle("active", tab === "idea");
+
     document.getElementById("tab-generate-btn").classList.toggle("btn-outline-primary", tab !== "generate");
     document.getElementById("tab-restructure-btn").classList.toggle("btn-outline-primary", tab !== "restructure");
     document.getElementById("tab-review-btn").classList.toggle("btn-outline-primary", tab !== "review");
     document.getElementById("tab-translate-btn").classList.toggle("btn-outline-primary", tab !== "translate");
+    document.getElementById("tab-idea-btn").classList.toggle("btn-outline-primary", tab !== "idea");
 }
 
 
@@ -1358,6 +1373,55 @@ document.addEventListener("DOMContentLoaded", function () {
             reader.readAsText(file);
         }
     });
+
+    const sourcesInput = document.getElementById("idea-sources-input");
+    if (sourcesInput) {
+        sourcesInput.addEventListener("change", async function (e) {
+            const files = e.target.files;
+            if (!files.length) return;
+
+            showToast(`Mengunggah & memproses ${files.length} file sumber manual...`, "info");
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const formData = new FormData();
+                formData.append("file", file);
+
+                try {
+                    const resp = await fetch(`${API_BASE}/api/parse-file`, {
+                        method: "POST",
+                        body: formData
+                    });
+                    if (!resp.ok) throw new Error(await resp.text());
+                    const data = await resp.json();
+
+                    // Create manual paper object
+                    const manualPaper = {
+                        title: data.filename,
+                        abstract: data.text,
+                        authors: ["Manual Upload"],
+                        year: new Date().getFullYear(),
+                        doi: "manual-" + Math.random().toString(36).substr(2, 9),
+                        openalex_url: "",
+                        url: "",
+                        pdf_url: "",
+                        source: "manual",
+                        cited_by_count: 0,
+                        relevance_score: 1.0
+                    };
+
+                    ideaSearchPapers.unshift(manualPaper);
+                    showToast(`File "${file.name}" berhasil ditambahkan sebagai sumber!`, "success");
+                } catch (err) {
+                    showToast(`Gagal memproses "${file.name}": ` + err.message, "danger");
+                }
+            }
+
+            // Render table
+            document.getElementById("idea-references-card").style.display = "";
+            renderIdeaReferencesTable();
+        });
+    }
 });
 
 async function reviseWithReview() {
@@ -1494,10 +1558,315 @@ function copyTranslated() {
 function downloadTranslated() {
     const el = document.getElementById("translate-output");
     const text = el.dataset.raw || el.textContent || "";
+    a.download = "translated-document.md";
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+
+// ---- Idea to Journal Mode ----
+
+function toggleIdeaTextbookOptions() {
+    const mode = document.getElementById("idea-mode").value;
+    const isTextbook = mode === "textbook";
+    document.getElementById("idea-target-length-group").classList.toggle("d-none", isTextbook);
+    document.getElementById("idea-num-chapters-group").classList.toggle("d-none", !isTextbook);
+}
+
+let ideaExtractedText = "";
+let ideaSearchPapers = [];
+
+async function analyzeIdea() {
+    const fileInput = document.getElementById("idea-file-input");
+    const linkInput = document.getElementById("idea-link-input").value.trim();
+
+    if (!fileInput.files?.length && !linkInput) {
+        alert("Pilih file draf ide atau tempel link dokumen Google Drive.");
+        return;
+    }
+
+    showLoading();
+    updateLoading("Menganalisis draf ide...", "Mengekstrak konsep dasar...");
+
+    try {
+        const url = `${API_BASE}/api/generate/idea/parse`;
+        let body;
+        
+        // Grab shared settings inputs from the UI
+        const provider = document.getElementById("provider").value;
+        const providerModel = document.getElementById("provider-model").value.trim() || null;
+        const providerBaseUrl = document.getElementById("provider-base-url").value.trim() || null;
+        const apiKey = document.getElementById("llm-api-key").value.trim() || null;
+
+        if (fileInput.files?.length) {
+            const form = new FormData();
+            form.append("file", fileInput.files[0]);
+            form.append("language", document.getElementById("idea-language").value);
+            form.append("provider", provider);
+            if (apiKey) form.append("api_key", apiKey);
+            if (providerBaseUrl) form.append("provider_base_url", providerBaseUrl);
+            if (providerModel) form.append("provider_model", providerModel);
+            body = form;
+        } else {
+            const form = new FormData();
+            form.append("file_url", linkInput);
+            form.append("language", document.getElementById("idea-language").value);
+            form.append("provider", provider);
+            if (apiKey) form.append("api_key", apiKey);
+            if (providerBaseUrl) form.append("provider_base_url", providerBaseUrl);
+            if (providerModel) form.append("provider_model", providerModel);
+            body = form;
+        }
+
+        const resp = await fetch(url, { method: "POST", body });
+        if (!resp.ok) throw new Error(await resp.text());
+
+        const data = await resp.json();
+        hideLoading();
+
+        // Populate fields
+        document.getElementById("idea-extracted-text").value = data.draft_idea;
+        document.getElementById("idea-search-query").value = data.search_query;
+        
+        // Show panel
+        document.getElementById("idea-analysis-panel").style.display = "";
+        showToast("Draf berhasil dianalisis!", "success");
+
+        // Automatically trigger OpenAlex references search
+        searchIdeaReferences();
+    } catch (err) {
+        hideLoading();
+        showToast("Gagal menganalisis draf: " + err.message, "danger");
+    }
+}
+
+function renderIdeaReferencesTable() {
+    const tableBody = document.getElementById("idea-ref-table").querySelector("tbody");
+    document.getElementById("idea-ref-count").textContent = `${ideaSearchPapers.length} ditemukan`;
+
+    if (ideaSearchPapers.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Tidak ada referensi yang ditemukan.</td></tr>';
+        return;
+    }
+
+    tableBody.innerHTML = "";
+    ideaSearchPapers.forEach((paper, idx) => {
+        const tr = document.createElement("tr");
+
+        const tdCheck = document.createElement("td");
+        tdCheck.innerHTML = `<input type="checkbox" class="idea-paper-checkbox" data-idx="${idx}" checked>`;
+        tr.appendChild(tdCheck);
+
+        const tdTitle = document.createElement("td");
+        tdTitle.className = "fw-semibold";
+        tdTitle.innerHTML = paper.title;
+        tr.appendChild(tdTitle);
+
+        const tdAuthors = document.createElement("td");
+        const firstAuthor = paper.authors?.length ? paper.authors[0] : "Unknown";
+        const authorStr = paper.authors?.length > 1 ? `${firstAuthor} et al.` : firstAuthor;
+        tdAuthors.textContent = `${authorStr} (${paper.year || "n.d."})`;
+        tr.appendChild(tdAuthors);
+
+        const tdCites = document.createElement("td");
+        tdCites.textContent = paper.cited_by_count || 0;
+        tr.appendChild(tdCites);
+
+        const tdActions = document.createElement("td");
+        if (paper.source === "manual") {
+            tdActions.innerHTML = '<span class="badge bg-success"><i class="bi bi-file-earmark-text me-1"></i>Manual</span>';
+        } else if (paper.pdf_url) {
+            tdActions.innerHTML = `<a href="${paper.pdf_url}" target="_blank" class="btn btn-sm btn-outline-secondary py-0"><i class="bi bi-file-earmark-pdf"></i> PDF</a>`;
+        } else {
+            tdActions.innerHTML = '<span class="text-muted small">No PDF</span>';
+        }
+        tr.appendChild(tdActions);
+
+        tableBody.appendChild(tr);
+    });
+}
+
+async function searchIdeaReferences() {
+    const query = document.getElementById("idea-search-query").value.trim();
+    if (!query) {
+        alert("Query pencarian tidak boleh kosong.");
+        return;
+    }
+
+    const refsCard = document.getElementById("idea-references-card");
+    const tableBody = document.getElementById("idea-ref-table").querySelector("tbody");
+    tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div>Mencari referensi OpenAlex...</td></tr>';
+    refsCard.style.display = "";
+
+    try {
+        const url = `${API_BASE}/api/search`;
+        const body = {
+            theme: query,
+            max_papers: 15,
+            language: document.getElementById("idea-language").value,
+        };
+
+        const resp = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+
+        if (!resp.ok) throw new Error(await resp.text());
+
+        const data = await resp.json();
+        const searchPapers = data.papers || [];
+        const manualPapers = ideaSearchPapers.filter(p => p.source === "manual");
+        ideaSearchPapers = [...manualPapers, ...searchPapers];
+
+        renderIdeaReferencesTable();
+    } catch (err) {
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">Gagal memuat referensi: ${err.message}</td></tr>`;
+    }
+}
+
+function toggleAllIdeaRefs() {
+    const checked = document.getElementById("idea-select-all").checked;
+    document.querySelectorAll(".idea-paper-checkbox").forEach((cb) => {
+        cb.checked = checked;
+    });
+}
+
+async function generateFromIdea() {
+    const ideaText = document.getElementById("idea-extracted-text").value.trim();
+    if (!ideaText) {
+        alert("Rangkuman ide utama tidak boleh kosong.");
+        return;
+    }
+
+    const checkboxes = document.querySelectorAll(".idea-paper-checkbox:checked");
+    if (checkboxes.length === 0) {
+        alert("Pilih setidaknya 1 referensi untuk memperkuat landasan ilmiah.");
+        return;
+    }
+
+    const selectedPapers = [];
+    checkboxes.forEach((cb) => {
+        const idx = parseInt(cb.dataset.idx);
+        selectedPapers.push(ideaSearchPapers[idx]);
+    });
+
+    const outputPanel = document.getElementById("idea-output-panel");
+    const logsEl = document.getElementById("idea-generation-logs");
+    const editor = document.getElementById("idea-output-editor");
+    const spinner = document.getElementById("idea-generation-spinner");
+
+    logsEl.innerHTML = "";
+    editor.value = "";
+    outputPanel.style.display = "";
+    spinner.style.display = "";
+
+    logsEl.scrollIntoView({ behavior: "smooth" });
+
+    // Build payload
+    const provider = document.getElementById("provider").value;
+    const providerModel = document.getElementById("provider-model").value.trim() || null;
+    const providerBaseUrl = document.getElementById("provider-base-url").value.trim() || null;
+    const apiKey = document.getElementById("llm-api-key").value.trim() || null;
+
+    const payload = {
+        theme: document.getElementById("idea-search-query").value.trim(),
+        papers: selectedPapers,
+        language: document.getElementById("idea-language").value,
+        provider: provider,
+        provider_model: providerModel,
+        api_key: apiKey,
+        provider_base_url: providerBaseUrl,
+        target_length: document.getElementById("idea-target-length").value,
+        multi_agent: document.getElementById("idea-multi-agent").checked,
+        mode: document.getElementById("idea-mode").value,
+        num_chapters: parseInt(document.getElementById("idea-num-chapters").value),
+        template_id: document.getElementById("idea-template").value || null,
+        do_research: document.getElementById("idea-do-research").checked,
+        library: document.getElementById("idea-library").checked,
+        draft_idea: ideaText,
+        paradigm: document.getElementById("idea-paradigm").value,
+        analysis_method: document.getElementById("idea-analysis-method").value,
+    };
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/generate/stream`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) throw new Error(await resp.text());
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop(); // keep partial line
+
+            for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                    const clean = line.replace("data: ", "").trim();
+                    if (!clean) continue;
+
+                    try {
+                        const entry = JSON.parse(clean);
+
+                        if (entry.type === "log") {
+                            const p = document.createElement("p");
+                            p.className = "mb-1";
+                            const timestamp = new Date().toLocaleTimeString();
+                            p.innerHTML = `<span class="text-secondary">[${timestamp}]</span> <strong class="text-primary">${entry.agent}:</strong> ${entry.message}`;
+                            logsEl.appendChild(p);
+                            logsEl.scrollTop = logsEl.scrollHeight;
+                        } else if (entry.type === "result") {
+                            editor.value = entry.journal;
+                            spinner.style.display = "none";
+                            showToast("Penulisan naskah selesai!", "success");
+                            editor.scrollIntoView({ behavior: "smooth" });
+                        } else if (entry.type === "error") {
+                            const p = document.createElement("p");
+                            p.className = "text-danger fw-bold mb-1";
+                            p.textContent = `[Error] ${entry.message}`;
+                            logsEl.appendChild(p);
+                            spinner.style.display = "none";
+                        }
+                    } catch (e) {
+                        // ignore heartbeat or parsing issues
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        spinner.style.display = "none";
+        const p = document.createElement("p");
+        p.className = "text-danger fw-bold mb-1";
+        p.textContent = `[Connection Error] ${err.message}`;
+        logsEl.appendChild(p);
+    }
+}
+
+function copyIdeaResult() {
+    const editor = document.getElementById("idea-output-editor");
+    const rawMarkdown = editor.value.trim();
+    if (!rawMarkdown) return;
+    const rawHtml = renderMarkdown(rawMarkdown);
+    _clipboardWrite(rawHtml, rawMarkdown);
+}
+
+function downloadIdeaResult() {
+    const text = document.getElementById("idea-output-editor").value.trim();
+    if (!text) return;
     const blob = new Blob([text], { type: "text/markdown" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "translated-document.md";
+    a.download = "jurnal-dari-ide.md";
     a.click();
     URL.revokeObjectURL(a.href);
 }

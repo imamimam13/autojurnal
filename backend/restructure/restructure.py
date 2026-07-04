@@ -45,7 +45,8 @@ def build_restructure_prompt(
 
     source_headings_str = _format_source_sections(source_sections)
     target_str = _format_template_sections(template, lang)
-    diag = diagram_instruction(has_data, lang, user_data)
+    source_text = "\n".join(s.get("content", "") for s in source_sections)
+    diag = diagram_instruction(has_data, lang, user_data, content=source_text)
 
     constraints = template.get("constraints") or {}
     constraint_lines = []
@@ -138,7 +139,8 @@ def _build_chunk_restructure_prompt(
     if constraints.get("citation_style"):
         constraint_lines.append(f"- Citation style: {constraints['citation_style']}")
     constraint_block = "\n" + "\n".join(constraint_lines) if constraint_lines else ""
-    diag = diagram_instruction(False, lang)
+    source_text = "\n".join(s.get("content", "") for s in source_sections)
+    diag = diagram_instruction(False, lang, content=source_text)
 
     no_ref = (
         "\n\nPENTING: HANYA gunakan sitasi inline (Penulis, Tahun). "
@@ -264,25 +266,24 @@ async def _single_restructure(
 
 
 async def render_diagrams(markdown_text: str) -> str:
-    mermaid_blocks = re.findall(
-        r"```mermaid\s*\n([\s\S]*?)```", markdown_text
-    )
-    if not mermaid_blocks:
+    pattern = r"```mermaid\s*\n([\s\S]*?)```"
+    matches = list(re.finditer(pattern, markdown_text))
+    if not matches:
         return markdown_text
 
     async with httpx.AsyncClient(timeout=15) as client:
-        for i, code in enumerate(mermaid_blocks):
+        for i, match in reversed(list(enumerate(matches))):
+            code = match.group(1).strip()
             try:
                 resp = await client.post(
                     "https://kroki.io/mermaid/svg",
-                    json={"diagram_source": code.strip(), "output_format": "svg"},
+                    json={"diagram_source": code, "output_format": "svg"},
                 )
                 if resp.status_code == 200:
                     svg_b64 = base64.b64encode(resp.content).decode()
                     replacement = f"![Mermaid Diagram {i+1}](data:image/svg+xml;base64,{svg_b64})"
-                    markdown_text = markdown_text.replace(
-                        f"```mermaid\n{code}```", replacement, 1
-                    )
+                    start, end = match.span()
+                    markdown_text = markdown_text[:start] + replacement + markdown_text[end:]
                 else:
                     print(f"[Diagram] Kroki error {resp.status_code} for block {i}")
             except Exception as e:

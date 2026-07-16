@@ -134,9 +134,18 @@ docker start ollama  # or: docker run -d --name ollama -p 11434:11434 ollama/oll
 # Pull a model
 docker exec ollama ollama pull gemma3:12b
 
-# Start the server
+# Start the server (Development mode with auto-reload)
 cd /Users/imamimam/Documents/GitHub/autojurnal
 MPLCONFIGDIR=/tmp/matplotlib venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Start the server in the background (nohup mode for persistence)
+MPLCONFIGDIR=/tmp/matplotlib nohup venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
+
+# View background logs
+tail -f server.log
+
+# Stop the background server
+pkill -f "uvicorn backend.main:app"
 ```
 
 Open `http://localhost:8000` in your browser.

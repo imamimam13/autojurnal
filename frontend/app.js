@@ -740,10 +740,123 @@ function renderMarkdown(text) {
     // Render mermaid after DOM update
     setTimeout(() => {
         if (typeof mermaid !== "undefined") {
-            mermaid.run({ nodes: document.querySelectorAll(".mermaid") });
+            mermaid.run({ 
+                nodes: document.querySelectorAll(".mermaid"),
+                postRenderCallback: (id) => {
+                    setTimeout(convertMermaidToPng, 100);
+                }
+            });
         }
     }, 100);
+    // Schedule fallbacks to convert after they render
+    setTimeout(convertMermaidToPng, 500);
+    setTimeout(convertMermaidToPng, 1500);
+    setTimeout(convertMermaidToPng, 3000);
     return withMermaid;
+}
+
+function convertMermaidToPng() {
+    const svgs = document.querySelectorAll(".mermaid svg");
+    svgs.forEach((svg) => {
+        if (svg.dataset.pngConverted) return;
+        
+        // Wait until it's rendered with width/height/viewbox
+        const bbox = svg.getBoundingClientRect();
+        if (bbox.width === 0 && bbox.height === 0 && !svg.getAttribute("viewBox")) {
+            return; // Not fully rendered yet
+        }
+        
+        svg.dataset.pngConverted = "true";
+
+        try {
+            const svgString = new XMLSerializer().serializeToString(svg);
+            const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+            const blobURL = URL.createObjectURL(svgBlob);
+            
+            const image = new Image();
+            image.onload = () => {
+                try {
+                    const canvas = document.createElement("canvas");
+                    
+                    let width = bbox.width;
+                    let height = bbox.height;
+                    
+                    if (!width || !height) {
+                        const viewBoxAttr = svg.getAttribute("viewBox");
+                        if (viewBoxAttr) {
+                            const parts = viewBoxAttr.split(" ");
+                            if (parts.length === 4) {
+                                width = parseFloat(parts[2]);
+                                height = parseFloat(parts[3]);
+                            }
+                        }
+                    }
+                    
+                    if (!width) width = 800;
+                    if (!height) height = 400;
+                    
+                    const scale = 2; // High resolution scaling
+                    canvas.width = width * scale;
+                    canvas.height = height * scale;
+                    
+                    const context = canvas.getContext("2d");
+                    context.scale(scale, scale);
+                    
+                    // Background white
+                    context.fillStyle = "#ffffff";
+                    context.fillRect(0, 0, width, height);
+                    
+                    context.drawImage(image, 0, 0, width, height);
+                    const pngDataUrl = canvas.toDataURL("image/png");
+                    
+                    svg.dataset.pngUrl = pngDataUrl;
+                } catch (e) {
+                    console.error("Error drawing SVG to canvas:", e);
+                } finally {
+                    URL.revokeObjectURL(blobURL);
+                }
+            };
+            image.src = blobURL;
+        } catch (e) {
+            console.error("Error converting SVG to PNG:", e);
+        }
+    });
+}
+
+function getHtmlContentForClipboard(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) return "";
+    
+    const clone = el.cloneNode(true);
+    
+    // Find all SVG elements in the clone
+    const svgs = clone.querySelectorAll("svg");
+    svgs.forEach((svg) => {
+        // Find the original SVG in the actual DOM to get its dataset
+        const originalSvgs = el.querySelectorAll("svg");
+        const index = Array.from(clone.querySelectorAll("svg")).indexOf(svg);
+        const originalSvg = originalSvgs[index];
+        
+        if (originalSvg && originalSvg.dataset.pngUrl) {
+            const img = document.createElement("img");
+            img.src = originalSvg.dataset.pngUrl;
+            img.style.maxWidth = "100%";
+            img.style.border = "1px solid #e4e4e7";
+            img.style.borderRadius = "8px";
+            img.style.display = "block";
+            img.style.margin = "15px 0";
+            
+            // If the svg is inside a .mermaid wrapper, replace the .mermaid wrapper
+            const mermaidDiv = svg.closest(".mermaid");
+            if (mermaidDiv) {
+                mermaidDiv.parentNode.replaceChild(img, mermaidDiv);
+            } else {
+                svg.parentNode.replaceChild(img, svg);
+            }
+        }
+    });
+    
+    return clone.innerHTML;
 }
 
 function stripMarkdown(text) {
@@ -807,7 +920,7 @@ function _clipboardWrite(htmlContent, plainText, successMsg = "Copied!") {
 }
 
 function copyJournal() {
-    const rawHtml = renderMarkdown(currentJournal);
+    const rawHtml = getHtmlContentForClipboard("journal-content") || renderMarkdown(currentJournal);
     _clipboardWrite(rawHtml, currentJournal.trim());
 }
 
@@ -1320,7 +1433,7 @@ async function restructureDoc() {
 function copyRestructured() {
     const el = document.getElementById("restructured-content");
     const rawMarkdown = el.dataset.raw || el.textContent || "";
-    const rawHtml = renderMarkdown(rawMarkdown);
+    const rawHtml = getHtmlContentForClipboard("restructured-content") || renderMarkdown(rawMarkdown);
     _clipboardWrite(rawHtml, rawMarkdown.trim());
 }
 
@@ -1502,7 +1615,7 @@ async function reviseWithReview() {
 function copyReviewResult() {
     const el = document.getElementById("review-content");
     const rawMarkdown = el.dataset.raw || el.textContent || "";
-    const rawHtml = renderMarkdown(rawMarkdown);
+    const rawHtml = getHtmlContentForClipboard("review-content") || renderMarkdown(rawMarkdown);
     _clipboardWrite(rawHtml, rawMarkdown.trim());
 }
 
@@ -1578,7 +1691,7 @@ async function translateDoc() {
 function copyTranslated() {
     const el = document.getElementById("translate-output");
     const rawMarkdown = el.dataset.raw || el.textContent || "";
-    const rawHtml = renderMarkdown(rawMarkdown);
+    const rawHtml = getHtmlContentForClipboard("translate-output") || renderMarkdown(rawMarkdown);
     _clipboardWrite(rawHtml, rawMarkdown.trim());
 }
 

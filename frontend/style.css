@@ -384,3 +384,119 @@ body {
 .modal-footer {
     border-top: 2.5px solid #000000 !important;
 }
+
+/* Responsive media queries for mobile devices */
+@media (max-width: 768px) {
+    /* Main navigation tab button group (horizontal scroll) */
+    .btn-group {
+        display: flex !important;
+        flex-direction: row !important;
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 10px !important;
+        box-shadow: 3px 3px 0px #000000 !important;
+    }
+    .btn-group::-webkit-scrollbar {
+        display: none !important;
+    }
+    .btn-group {
+        -ms-overflow-style: none !important;
+        scrollbar-width: none !important;
+    }
+    .btn-group .btn {
+        flex: 0 0 auto !important;
+        padding: 0.6rem 0.85rem !important;
+        font-size: 0.8rem !important;
+    }
+}
+
+/* Responsive Input Groups */
+.input-group-responsive {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.input-group-responsive > .form-control,
+.input-group-responsive > .form-select,
+.input-group-responsive > .btn {
+    width: 100% !important;
+    border-radius: 10px !important;
+}
+@media (min-width: 576px) {
+    .input-group-responsive {
+        flex-direction: row;
+        gap: 0;
+    }
+    .input-group-responsive > .form-control,
+    .input-group-responsive > .form-select {
+        flex: 1 1 auto;
+        width: 1% !important;
+        border-top-right-radius: 0 !important;
+        border-bottom-right-radius: 0 !important;
+    }
+    .input-group-responsive > .btn {
+        width: auto !important;
+        flex: 0 0 auto;
+        border-top-left-radius: 0 !important;
+        border-bottom-left-radius: 0 !important;
+    }
+    .input-group-responsive > .btn:not(:last-child) {
+        border-radius: 0 !important;
+    }
+}
+
+/* Paper item meta wrap */
+.paper-item .paper-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    align-items: center;
+}
+
+/* Responsive typography & adjustments */
+@media (max-width: 576px) {
+    .container {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    .card-body {
+        padding: 1rem !important;
+    }
+    .card-header {
+        padding: 0.75rem 1rem !important;
+    }
+    .navbar-brand {
+        font-size: 1.3rem !important;
+    }
+    
+    /* Journal Reading View */
+    #journal-content {
+        padding: 0.75rem !important;
+        font-size: 0.95rem !important;
+    }
+    #journal-content p {
+        text-align: left !important;
+    }
+    #journal-content h1 {
+        font-size: 1.4rem !important;
+    }
+    #journal-content h2 {
+        font-size: 1.2rem !important;
+    }
+    #journal-content h3 {
+        font-size: 1.05rem !important;
+    }
+    
+    /* Templates Manager List View */
+    .list-group-item.d-flex {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 10px;
+    }
+    .list-group-item.d-flex .d-flex {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+

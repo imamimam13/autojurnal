@@ -4,7 +4,7 @@ from typing import Optional
 from search.openalex import Paper
 from providers.base import LLMProvider
 from rag.store import store
-from .agents import TokenTracker, _methodology_prompt, _lead_story_prompt
+from .agents import TokenTracker, _methodology_prompt, _lead_story_prompt, _summarize_section_prompt
 
 
 DEFAULT_SUBSECTIONS = {
@@ -159,9 +159,15 @@ Chapter {num_chapters}: [Chapter Title]
 Output ONLY the chapter list, no extra commentary."""
 
 
-def _chapter_researcher_prompt(language: str, theme: str, chapter_num: int, chapter_title: str, previous_content: str) -> str:
+def _chapter_researcher_prompt(language: str, theme: str, chapter_num: int, chapter_title: str, prev_titles: str, previous_summary: str = "") -> str:
     if language == "id":
-        prev = f"\n\nBab-bab sebelumnya:\n{previous_content}\n\n---\n" if previous_content else ""
+        prev = ""
+        if prev_titles:
+            prev += f"Bab-bab sebelumnya:\n{prev_titles}\n"
+        if previous_summary:
+            prev += f"Ringkasan materi bab-bab sebelumnya (Working Memory):\n{previous_summary}\n"
+        if prev:
+            prev = f"\n\n{prev}\n---\n"
         return f"""Tema Buku Ajar: "{theme}"
 Bab {chapter_num}: {chapter_title}{prev}
 
@@ -175,8 +181,17 @@ Rencana harus mencakup:
 4. Contoh atau ilustrasi yang relevan
 5. Hubungan dengan bab sebelumnya
 
+PENTING: Rencana bab harus fokus pada materi baru. JANGAN merencanakan sub-topik atau konsep yang sudah dibahas secara detail di bab-bab sebelumnya (lihat Working Memory).
+
 Keluarkan ONLY rencana bab, tanpa komentar tambahan."""
-    prev = f"\n\nPrevious chapters:\n{previous_content}\n\n---\n" if previous_content else ""
+
+    prev = ""
+    if prev_titles:
+        prev += f"Previous chapters:\n{prev_titles}\n"
+    if previous_summary:
+        prev += f"Summary of previous chapters (Working Memory):\n{previous_summary}\n"
+    if prev:
+        prev = f"\n\n{prev}\n---\n"
     return f"""Textbook Theme: "{theme}"
 Chapter {chapter_num}: {chapter_title}{prev}
 
@@ -189,6 +204,8 @@ The plan must include:
 3. Key concepts to explain
 4. Relevant examples or illustrations
 5. Connection to previous chapters
+
+IMPORTANT: The chapter plan must focus on new material. DO NOT plan sub-topics or concepts already covered in detail in previous chapters (refer to Working Memory).
 
 Output ONLY the chapter plan, no extra commentary."""
 
@@ -235,9 +252,9 @@ For each finding:
 Output ONLY the extracted material, organized by topic."""
 
 
-def _chapter_writer_prompt(language: str, theme: str, chapter_num: int, chapter_title: str, research_plan: str, findings: str, previous_content: str, paper_list: str, all_chapter_titles: str, subsections: Optional[list[str]] = None, has_data: bool = False, user_data: Optional[str] = None) -> str:
+def _chapter_writer_prompt(language: str, theme: str, chapter_num: int, chapter_title: str, research_plan: str, findings: str, prev_titles: str, paper_list: str, all_chapter_titles: str, previous_summary: str = "", subsections: Optional[list[str]] = None, has_data: bool = False, user_data: Optional[str] = None) -> str:
     from diagrams.prompts import diagram_instruction
-    diag = diagram_instruction(has_data, language, user_data, content=findings + "\n" + previous_content)
+    diag = diagram_instruction(has_data, language, user_data, content=findings + "\n" + prev_titles)
     no_ref = (
         "\n\nPENTING: HANYA gunakan sitasi inline (Penulis, Tahun). "
         "JANGAN pernah mencantumkan judul jurnal, volume, nomor, halaman, DOI, atau URL di badan bab. "
@@ -249,7 +266,13 @@ def _chapter_writer_prompt(language: str, theme: str, chapter_num: int, chapter_
     )
     if language == "id":
         subs = subsections or DEFAULT_SUBSECTIONS["id"]
-        prev = f"\n\nBAB SEBELUMNYA:\n{previous_content}\n\n---\n" if previous_content else ""
+        prev = ""
+        if prev_titles:
+            prev += f"Struktur bab sebelumnya:\n{prev_titles}\n"
+        if previous_summary:
+            prev += f"Ringkasan materi bab sebelumnya (Working Memory):\n{previous_summary}\n"
+        if prev:
+            prev = f"\n\nBAB SEBELUMNYA:\n{prev}\n---\n"
         sub_structure = "\n   ".join(f"### {s}" for s in subs)
         return f"""Tema Buku Ajar: "{theme}"
 {all_chapter_titles}{prev}
@@ -276,9 +299,17 @@ ATURAN PENULISAN BUKU AJAR:
 6. Gunakan bahasa yang jelas, mudah dipahami, dan pedagogis
 7. Sertakan contoh konkret dan ilustrasi konseptual
 8. Gunakan tabel Markdown untuk perbandingan konsep.{diag}{no_ref}
+PENTING: Dilarang keras mendefinisikan ulang istilah atau konsep yang sudah dibahas di bab-bab sebelumnya (lihat Working Memory). Gunakan referensi silang (cross-reference) seperti 'sebagaimana dibahas di Bab X' jika merujuk kembali konsep tersebut.
 9. Output ONLY konten bab, tanpa komentar tambahan"""
+
     subs = subsections or DEFAULT_SUBSECTIONS["en"]
-    prev = f"\n\nPREVIOUS CHAPTER:\n{previous_content}\n\n---\n" if previous_content else ""
+    prev = ""
+    if prev_titles:
+        prev += f"Structure of previous chapters:\n{prev_titles}\n"
+    if previous_summary:
+        prev += f"Summary of previous chapters (Working Memory):\n{previous_summary}\n"
+    if prev:
+        prev = f"\n\nPREVIOUS CHAPTER:\n{prev}\n---\n"
     sub_structure = "\n   ".join(f"### {s}" for s in subs)
     return f"""Textbook Theme: "{theme}"
 {all_chapter_titles}{prev}
@@ -305,6 +336,7 @@ TEXTBOOK WRITING RULES:
 6. Use clear, easy-to-understand, pedagogical language
 7. Include concrete examples and conceptual illustrations
 8. Use Markdown tables for concept comparisons.{diag}{no_ref}
+IMPORTANT: Strictly forbidden to redefine terms or concepts already discussed in previous chapters (refer to Working Memory). Use cross-references like 'as discussed in Chapter X' when referencing those concepts.
 9. Output ONLY the chapter content, no extra commentary"""
 
 
@@ -483,10 +515,13 @@ async def generate_textbook(
     all_chapter_titles = "\n".join(f"Chapter {i+1}: {t}" for i, t in enumerate(chapters))
     all_content = ""
     prev_titles = ""
+    global_memory = []
 
     for i, title in enumerate(chapters):
         chapter_num = i + 1
         await log("Pipeline", f"Bab {chapter_num}/{num_chapters}: {title}")
+
+        previous_summary = "\n".join(global_memory)
 
         # RAG context for this chapter
         rag = ""
@@ -498,7 +533,7 @@ async def generate_textbook(
         # 2. Lead Researcher (chapter plan)
         await log("Lead Researcher", "Membuat rencana bab...")
         researcher_sys = template_ctx + TEXTBOOK_PROMPTS["lead_researcher"][lang]
-        task = _chapter_researcher_prompt(lang, theme, chapter_num, title, prev_titles)
+        task = _chapter_researcher_prompt(lang, theme, chapter_num, title, prev_titles, previous_summary=previous_summary)
         plan = await tracker.run(provider, researcher_sys, task)
         await log("Lead Researcher", f"Rencana selesai ({len(plan)} chars)")
 
@@ -512,7 +547,7 @@ async def generate_textbook(
         # 4. Lead Writer
         await log("Lead Writer", "Menulis bab...")
         writer_sys = template_ctx + TEXTBOOK_PROMPTS["lead_writer"][lang]
-        task = _chapter_writer_prompt(lang, theme, chapter_num, title, plan, findings, prev_titles, paper_list, all_chapter_titles, subsections, has_data, user_data)
+        task = _chapter_writer_prompt(lang, theme, chapter_num, title, plan, findings, prev_titles, paper_list, all_chapter_titles, previous_summary=previous_summary, subsections=subsections, has_data=has_data, user_data=user_data)
         chapter_content = await tracker.run(provider, writer_sys, task)
         await log("Lead Writer", f"Bab selesai ({len(chapter_content)} chars)")
 
@@ -529,6 +564,17 @@ async def generate_textbook(
         task = _chapter_humanizer_prompt(lang, chapter_num, title, chapter_content)
         chapter_content = await tracker.run(provider, humanizer_sys, task)
         await log("Humanizer", f"Selesai ({len(chapter_content)} chars)")
+
+        # 5b. Memory Updater (State Tracker)
+        await log("Memory Updater", "Memperbarui Working Memory global...")
+        if lang == "id":
+            summary_sys = "Anda adalah Memory Updater yang ahli dalam membuat ringkasan akademis singkat dan padat untuk menghindari repetisi."
+        else:
+            summary_sys = "You are a Memory Updater expert in creating concise, dense academic summaries to avoid repetition."
+        summary_task = _summarize_section_prompt(lang, f"Bab {chapter_num}: {title}" if language == "id" else f"Chapter {chapter_num}: {title}", chapter_content)
+        chapter_summary = await tracker.run(provider, summary_sys, summary_task)
+        global_memory.append(f"### Bab {chapter_num}: {title}\n{chapter_summary}" if language == "id" else f"### Chapter {chapter_num}: {title}\n{chapter_summary}")
+        await log("Memory Updater", f"Working Memory diperbarui untuk bab {chapter_num}")
 
         await log("Pipeline", f"Bab {chapter_num} selesai")
         all_content += "\n\n" + chapter_content

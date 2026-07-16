@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-2.0-flash"
 
+    openai_compatible_api_key: Optional[str] = None
+    openai_compatible_model: str = "llama3"
+    openai_compatible_base_url: str = "http://localhost:8080/v1"
+
     default_max_papers: int = 20
     default_year_range: int = 3
 

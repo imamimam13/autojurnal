@@ -338,6 +338,7 @@ PROVIDER_ENV_MAP = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "openai_compatible": "OPENAI_COMPATIBLE_API_KEY",
 }
 
 
@@ -662,6 +663,8 @@ async def generate_journal_stream(req: GenerateRequest):
             previous_works_ctx=prev_works_ctx,
             do_library=req.library,
             draft_idea=req.draft_idea,
+            paradigm=req.paradigm,
+            analysis_method=req.analysis_method,
         ))
 
         while True:
@@ -687,6 +690,7 @@ async def _run_generation(
     provider, papers, theme, language, target_length, num_chapters,
     mode, multi_agent, template, has_data, user_data, log_queue,
     previous_works_ctx="", do_library=False, draft_idea=None,
+    paradigm=None, analysis_method=None,
 ):
     try:
         prev_ctx = previous_works_ctx
@@ -707,7 +711,7 @@ async def _run_generation(
                 template=template, has_data=has_data, user_data=user_data,
                 log_queue=log_queue, previous_works_ctx=prev_ctx,
                 draft_idea=draft_idea,
-                paradigm=req.paradigm, analysis_method=req.analysis_method,
+                paradigm=paradigm, analysis_method=analysis_method,
             )
             token_usage["estimated"] = True
         else:
@@ -1405,7 +1409,7 @@ async def parse_template_file(file: UploadFile = File(...)):
     headings = detect_all(text)
 
     import json as _json
-    for _provider_id in ["ollama", "openai", "anthropic", "gemini"]:
+    for _provider_id in ["ollama", "openai", "anthropic", "gemini", "openai_compatible"]:
         try:
             provider = get_provider(_provider_id)
             if provider:

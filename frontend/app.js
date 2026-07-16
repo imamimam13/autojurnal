@@ -3,6 +3,7 @@ const API_BASE = window.location.origin;
 let allPapers = [];
 let selectedIndices = new Set();
 let collectedPapers = [];
+let ideaCollectedPapers = [];
 let currentJournal = "";
 
 let templates = [];
@@ -11,7 +12,9 @@ let parsedTemplate = null;
 document.addEventListener("DOMContentLoaded", async () => {
     await loadProviders();
     restoreSettings();
+    updatePlaceholders(document.getElementById("provider").value);
     restoreCollection();
+    restoreIdeaCollection();
     await loadTemplateList();
 
     document.getElementById("mode").addEventListener("change", () => {
@@ -24,6 +27,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const provider = document.getElementById("provider").value;
         const apiKey = document.getElementById("llm-api-key")?.value.trim();
         saveApiKeyToBackend(provider, apiKey);
+        updatePlaceholders(provider);
     });
 
     document.querySelectorAll("#input-card input, #input-card select, #tab-idea select, #tab-idea input").forEach((el) => {
@@ -118,8 +122,31 @@ function saveSettings() {
     } catch {}
 }
 
+function updatePlaceholders(provider) {
+    const baseUrlEl = document.getElementById("provider-base-url");
+    const modelEl = document.getElementById("provider-model");
+    if (!baseUrlEl || !modelEl) return;
+
+    if (provider === "ollama") {
+        baseUrlEl.placeholder = "http://localhost:11434";
+        modelEl.placeholder = "gemma3:12b (default)";
+    } else if (provider === "openai") {
+        baseUrlEl.placeholder = "https://api.openai.com/v1";
+        modelEl.placeholder = "gpt-4o-mini (default)";
+    } else if (provider === "openai_compatible") {
+        baseUrlEl.placeholder = "http://localhost:8080/v1 (e.g. llama.cpp)";
+        modelEl.placeholder = "llama3 (default)";
+    } else if (provider === "anthropic") {
+        baseUrlEl.placeholder = "https://api.anthropic.com/v1";
+        modelEl.placeholder = "claude-3-haiku-20240307 (default)";
+    } else if (provider === "gemini") {
+        baseUrlEl.placeholder = "https://generativelanguage.googleapis.com/v1";
+        modelEl.placeholder = "gemini-2.0-flash (default)";
+    }
+}
+
 function saveApiKeyToBackend(provider, apiKey) {
-    const supported = ["ollama", "openai", "anthropic", "gemini"];
+    const supported = ["ollama", "openai", "anthropic", "gemini", "openai_compatible"];
     if (!supported.includes(provider) || !apiKey) return;
     clearTimeout(_apiKeyTimeout);
     _apiKeyTimeout = setTimeout(() => {
@@ -1739,17 +1766,10 @@ async function generateFromIdea() {
         return;
     }
 
-    const checkboxes = document.querySelectorAll(".idea-paper-checkbox:checked");
-    if (checkboxes.length === 0) {
-        alert("Pilih setidaknya 1 referensi untuk memperkuat landasan ilmiah.");
+    if (ideaCollectedPapers.length === 0) {
+        alert("Koleksi referensi ide kosong. Silakan pilih referensi dari hasil pencarian dan klik 'Masukkan ke Koleksi Ide' terlebih dahulu.");
         return;
     }
-
-    const selectedPapers = [];
-    checkboxes.forEach((cb) => {
-        const idx = parseInt(cb.dataset.idx);
-        selectedPapers.push(ideaSearchPapers[idx]);
-    });
 
     const outputPanel = document.getElementById("idea-output-panel");
     const logsEl = document.getElementById("idea-generation-logs");
@@ -1771,7 +1791,7 @@ async function generateFromIdea() {
 
     const payload = {
         theme: document.getElementById("idea-search-query").value.trim(),
-        papers: selectedPapers,
+        papers: ideaCollectedPapers,
         language: document.getElementById("idea-language").value,
         provider: provider,
         provider_model: providerModel,
@@ -1869,4 +1889,121 @@ function downloadIdeaResult() {
     a.download = "jurnal-dari-ide.md";
     a.click();
     URL.revokeObjectURL(a.href);
+}
+
+// ---- Idea Collection Helpers ----
+
+function saveIdeaCollection() {
+    try {
+        localStorage.setItem("autojurnal-idea-collection", JSON.stringify(ideaCollectedPapers));
+    } catch {}
+}
+
+function restoreIdeaCollection() {
+    try {
+        const raw = localStorage.getItem("autojurnal-idea-collection");
+        if (raw) {
+            ideaCollectedPapers = JSON.parse(raw);
+            renderIdeaCollectedPapers();
+        }
+    } catch {}
+}
+
+function addSelectedToIdeaCollection() {
+    console.log("addSelectedToIdeaCollection called");
+    try {
+        const checkboxes = document.querySelectorAll(".idea-paper-checkbox:checked");
+        if (checkboxes.length === 0) {
+            alert("Pilih setidaknya 1 referensi untuk dimasukkan ke koleksi.");
+            return;
+        }
+        const selected = [];
+        checkboxes.forEach((cb) => {
+            const idx = parseInt(cb.dataset.idx);
+            selected.push(ideaSearchPapers[idx]);
+        });
+
+        const existingKeys = new Set(
+            ideaCollectedPapers.map(p => p.doi || p.openalex_url || p.title)
+        );
+        const newPapers = selected.filter(
+            p => !existingKeys.has(p.doi || p.openalex_url || p.title)
+        );
+
+        if (newPapers.length === 0) {
+            alert("Semua paper yang dipilih sudah ada di koleksi referensi ide.");
+            return;
+        }
+
+        ideaCollectedPapers.push(...newPapers);
+        renderIdeaCollectedPapers();
+        saveIdeaCollection();
+        alert(`${newPapers.length} paper berhasil ditambahkan ke koleksi referensi ide!`);
+
+        // Uncheck checkboxes for visual feedback
+        document.querySelectorAll(".idea-paper-checkbox").forEach(cb => cb.checked = false);
+        const selectAllChk = document.getElementById("idea-select-all");
+        if (selectAllChk) selectAllChk.checked = false;
+    } catch (e) {
+        console.error("addSelectedToIdeaCollection error:", e);
+        alert("Error: " + e.message);
+    }
+}
+
+function removeFromIdeaCollection(index) {
+    ideaCollectedPapers.splice(index, 1);
+    renderIdeaCollectedPapers();
+    saveIdeaCollection();
+}
+
+function clearIdeaCollection() {
+    if (ideaCollectedPapers.length === 0) return;
+    if (confirm("Apakah Anda yakin ingin mengosongkan koleksi referensi ide?")) {
+        ideaCollectedPapers = [];
+        renderIdeaCollectedPapers();
+        saveIdeaCollection();
+        showToast("Koleksi referensi ide dikosongkan");
+    }
+}
+
+function renderIdeaCollectedPapers() {
+    console.log("renderIdeaCollectedPapers, count:", ideaCollectedPapers.length);
+    const container = document.getElementById("idea-collection-list");
+    const count = document.getElementById("idea-collection-count");
+    const card = document.getElementById("idea-collection-card");
+    const controlCard = document.getElementById("idea-gen-control-card");
+
+    if (!container || !count || !card || !controlCard) return;
+
+    count.textContent = ideaCollectedPapers.length;
+
+    if (ideaCollectedPapers.length === 0) {
+        card.style.display = "none";
+        controlCard.style.display = "none";
+        container.innerHTML = "";
+        return;
+    }
+
+    card.style.display = "block";
+    controlCard.style.display = "block";
+
+    container.innerHTML = ideaCollectedPapers
+        .map((p, i) => `
+            <div class="paper-item p-3 border-bottom">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1 me-3">
+                        <div class="paper-title fw-semibold text-dark mb-1">${escapeHtml(p.title)}</div>
+                        <div class="paper-meta text-muted small">
+                            ${(p.authors || []).slice(0, 3).join(", ")}${p.authors.length > 3 ? " et al." : ""}
+                            ${p.year ? ` (${p.year})` : ""}
+                            ${p.source ? ` - ${escapeHtml(p.source)}` : ""}
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger" onclick="removeFromIdeaCollection(${i})" title="Remove">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            </div>
+        `)
+        .join("");
 }

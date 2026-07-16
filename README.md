@@ -8,7 +8,7 @@ AI-powered academic journal and textbook generator with multi-agent orchestratio
 - **Web Research** — Bing Web + Bing News + Google Scholar via httpx (no browser binary needed)
 - **RAG (Retrieval-Augmented Generation)** — PDF scraping, chunking, and semantic search via Qdrant in-memory + TF-IDF (or FastEmbed)
 - **Diagrams** — Matplotlib (bar/line/pie/venn/gantt) + Mermaid (flowchart/concept_map, rendered via CDN — no `dot` binary required)
-- **Multi-Provider** — Ollama, Google Gemini, OpenAI, Anthropic
+- **Multi-Provider** — Ollama, Google Gemini, OpenAI, Anthropic, OpenAI Compatible (e.g. llama.cpp, LM Studio, vLLM)
 - **Templates** — 10 preset templates (IMRAD, Systematic Review, Case Report, Lab Reports, etc.) with category grouping + user-uploaded templates
 - **Restructure** — Heading detection, Google Docs/Drive download, chunked LLM restructure
 - **Human Review** — `.docx` comment extraction, Google Docs link parsing, chunked revision
@@ -86,6 +86,9 @@ source venv/bin/activate
 # Install dependencies (matplotlib needs font cache set)
 MPLCONFIGDIR=/tmp/matplotlib pip install -r backend/requirements.txt
 
+# Install optional provider dependencies (OpenAI, Anthropic, Gemini, OpenAI Compatible)
+pip install -r backend/requirements-optional.txt
+
 # Install matplotlib separately if needed
 MPLCONFIGDIR=/tmp/matplotlib pip install matplotlib matplotlib-venn
 ```
@@ -115,6 +118,11 @@ ANTHROPIC_MODEL=claude-3-haiku-20240307
 # Google Gemini
 GEMINI_API_KEY=AIza...
 GEMINI_MODEL=gemini-2.0-flash
+
+# OpenAI Compatible (e.g. llama.cpp, LM Studio, vLLM)
+OPENAI_COMPATIBLE_API_KEY=
+OPENAI_COMPATIBLE_MODEL=llama3
+OPENAI_COMPATIBLE_BASE_URL=http://localhost:8080/v1
 ```
 
 ## Usage

@@ -45,3 +45,8 @@ register_provider("ollama", "backend.providers.ollama", "OllamaProvider", {"api_
 register_provider("openai", "backend.providers.openai_provider", "OpenAIProvider", {"api_key": settings.openai_api_key})
 register_provider("anthropic", "backend.providers.anthropic_provider", "AnthropicProvider", {"api_key": settings.anthropic_api_key})
 register_provider("gemini", "backend.providers.gemini_provider", "GeminiProvider", {"api_key": settings.gemini_api_key})
+register_provider("openai_compatible", "backend.providers.openai_compatible", "OpenAICompatibleProvider", {
+    "api_key": settings.openai_compatible_api_key,
+    "base_url": settings.openai_compatible_base_url,
+    "model": settings.openai_compatible_model,
+})

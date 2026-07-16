@@ -371,10 +371,18 @@ def _format_template_sections(template: Optional[dict], lang: str) -> str:
     return f"\n\n{header}\n" + "\n".join(items)
 
 
-def _researcher_prompt(language: str, section_key: str, theme: str, section_heading: str, rag: str, previous: str, template: Optional[dict] = None) -> str:
+def _researcher_prompt(language: str, section_key: str, theme: str, section_heading: str, rag: str, prev_titles: str, previous_summary: str = "", template: Optional[dict] = None) -> str:
     template_block = _format_template_sections(template, language)
     template_block += _format_template_constraints(template, language)
     if language == "id":
+        prev_block = ""
+        if prev_titles:
+            prev_block += f"Struktur bagian terdahulu:\n{prev_titles}\n"
+        if previous_summary:
+            prev_block += f"Ringkasan isi bagian terdahulu (Working Memory):\n{previous_summary}\n"
+        if prev_block:
+            prev_block = f"Bagian yang sudah ditulis sebelumnya:\n\n{prev_block}\n---\n\n"
+
         return f"""Tema Penelitian: "{theme}"
 
 Bagian yang akan ditulis: {section_heading}
@@ -382,7 +390,7 @@ Bagian yang akan ditulis: {section_heading}
 Konteks dari paper yang relevan:
 {rag or "(tidak ada konten spesifik)"}
 
-{('Bagian yang sudah ditulis sebelumnya:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}{template_block}
+{prev_block}{template_block}
 
 Tugas Anda sebagai Lead Researcher:
 Buatlah rencana penelitian yang DETAIL untuk bagian {section_heading}.
@@ -393,7 +401,18 @@ Rencana harus mencakup:
 3. Paper mana yang relevan untuk setiap poin
 4. Struktur/alur penulisan yang logis
 
+PENTING: Rencana penelitian harus fokus pada sub-topik baru. JANGAN merencanakan pembahasan atau definisi konsep yang sudah dibahas di bagian-bagian sebelumnya (lihat Working Memory).
+
 Keluarkan ONLY rencana penelitian, tanpa komentar tambahan."""
+    
+    prev_block = ""
+    if prev_titles:
+        prev_block += f"Structure of previous sections:\n{prev_titles}\n"
+    if previous_summary:
+        prev_block += f"Summary of previous sections (Working Memory):\n{previous_summary}\n"
+    if prev_block:
+        prev_block = f"Previously written sections:\n\n{prev_block}\n---\n\n"
+
     return f"""Research Theme: "{theme}"
 
 Section to write: {section_heading}
@@ -401,7 +420,7 @@ Section to write: {section_heading}
 Relevant paper context:
 {rag or "(no specific content available)"}
 
-{('Previously written sections:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}
+{prev_block}
 
 Your task as Lead Researcher:
 Create a DETAILED research plan for the {section_heading} section.
@@ -411,6 +430,8 @@ The plan must include:
 2. Specific arguments or analyses to develop
 3. Which papers are relevant for each point
 4. Logical structure/flow
+
+IMPORTANT: The research plan must focus on new sub-topics. DO NOT plan discussions or definitions of concepts already covered in previous sections (refer to Working Memory).
 
 Output ONLY the research plan, no extra commentary."""
 
@@ -455,9 +476,9 @@ For each finding:
 Output ONLY the synthesized findings, organized by theme."""
 
 
-def _writer_prompt(language: str, section_key: str, theme: str, section_heading: str, research_plan: str, findings: str, word_target: str, previous: str, paper_list: str, has_data: bool = False, user_data: Optional[str] = None) -> str:
+def _writer_prompt(language: str, section_key: str, theme: str, section_heading: str, research_plan: str, findings: str, word_target: str, prev_titles: str, paper_list: str, previous_summary: str = "", has_data: bool = False, user_data: Optional[str] = None) -> str:
     from diagrams.prompts import diagram_instruction
-    diagram_block = diagram_instruction(has_data, language, user_data, content=findings + "\n" + previous)
+    diagram_block = diagram_instruction(has_data, language, user_data, content=findings + "\n" + prev_titles)
 
     no_ref = (
         "\n\nPENTING: HANYA gunakan sitasi inline (Penulis, Tahun). "
@@ -470,6 +491,14 @@ def _writer_prompt(language: str, section_key: str, theme: str, section_heading:
     )
 
     if language == "id":
+        prev_block = ""
+        if prev_titles:
+            prev_block += f"Struktur bagian terdahulu:\n{prev_titles}\n"
+        if previous_summary:
+            prev_block += f"Ringkasan isi bagian terdahulu (Working Memory):\n{previous_summary}\n"
+        if prev_block:
+            prev_block = f"Bagian yang sudah ditulis sebelumnya:\n\n{prev_block}\n---\n\n"
+
         base = f"""Tema Penelitian: "{theme}"
 Bagian yang akan ditulis: {section_heading}
 
@@ -479,8 +508,7 @@ Rencana Penelitian (dari Lead Researcher):
 Temuan yang Disintesis (dari Source Reviewer):
 {findings or "(tidak ada temuan spesifik)"}
 
-{('Bagian yang sudah ditulis sebelumnya:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}
-
+{prev_block}
 DAFTAR REFERENSI (semua paper yang tersedia):
 {paper_list}
 
@@ -489,9 +517,18 @@ ATURAN PENULISAN:
 2. Setiap klaim WAJIB disertai sitasi inline format APA: (Penulis, Tahun)
 3. Tulis kalimat ORISINAL — jangan menyalin dari konteks atau abstrak
 4. Target panjang: sekitar {word_target} kata untuk bagian ini
-5. VARIASI NARASI & ANTI-REPETISI: JANGAN gunakan kalimat pembuka yang seragam atau repetitif. Hindari memulai paragraf atau kalimat dengan template pasif seperti "Penelitian ini bertujuan untuk...", "Hasil penelitian menunjukkan bahwa...", "Hal ini sejalan dengan penelitian oleh...", atau "Penelitian yang dilakukan oleh (Penulis, Tahun) menemukan...". Tulis klaim ilmiah secara langsung dan sintesis teoretis yang aktif, variasikan panjang kalimat, serta batasi kata hubung transisi berulang ("Selain itu,", "Lebih lanjut,", "Dalam konteks ini,") di awal paragraf/kalimat.
+5. VARIASI NARASI & ANTI-REPETISI: JANGAN gunakan kalimat pembuka yang seragam atau repetitif. Hindari memulai paragraf atau kalimat dengan template pasif. Tulis klaim ilmiah secara langsung dan sintesis teoretis yang aktif, variasikan panjang kalimat, serta batasi kata hubung transisi berulang.
+PENTING: Dilarang keras mendefinisikan ulang istilah atau konsep yang sudah dibahas/didefinisikan di bagian sebelumnya (lihat Working Memory). Jika konsep terdahulu dirujuk kembali, gunakan referensi silang (cross-reference) seperti 'sebagaimana dibahas di bagian Pendahuluan', jangan tulis ulang penjelasannya.
 6. Output ONLY konten bagian dengan heading ##, tanpa komentar tambahan{diagram_block}{no_ref}"""
     else:
+        prev_block = ""
+        if prev_titles:
+            prev_block += f"Structure of previous sections:\n{prev_titles}\n"
+        if previous_summary:
+            prev_block += f"Summary of previous sections (Working Memory):\n{previous_summary}\n"
+        if prev_block:
+            prev_block = f"Previously written sections:\n\n{prev_block}\n---\n\n"
+
         base = f"""Research Theme: "{theme}"
 Section to write: {section_heading}
 
@@ -501,8 +538,7 @@ Research Plan (from Lead Researcher):
 Synthesized Findings (from Source Reviewer):
 {findings or "(no specific findings)"}
 
-{('Previously written sections:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}
-
+{prev_block}
 PAPER LIST (all available papers):
 {paper_list}
 
@@ -511,7 +547,8 @@ WRITING RULES:
 2. Every claim MUST have an inline APA citation: (Author, Year)
 3. Write ORIGINAL sentences — do not copy from context or abstracts
 4. Target length: approximately {word_target} words for this section
-5. NARRATIVE VARIETY & ANTI-REPETITION: DO NOT use repetitive sentence starters or narrative clichés. Avoid beginning paragraphs or sentences with robotic templates like "This study aims to...", "The results of this study show...", "This is in line with...", or "Research conducted by (Author, Year) found...". Write direct, active theoretical claims, vary sentence lengths, and limit transition overuse ("Furthermore,", "In addition,", "Moreover,") at the start of sentences/paragraphs.
+5. NARRATIVE VARIETY & ANTI-REPETITION: DO NOT use repetitive sentence starters or narrative clichés. Avoid beginning paragraphs or sentences with robotic templates. Write direct, active theoretical claims, vary sentence lengths, and limit transition overuse.
+IMPORTANT: Strictly forbidden to redefine terms or concepts already discussed/defined in previous sections (refer to Working Memory). If referencing previous concepts, use cross-references like 'as discussed in the Introduction section' instead of explaining it again in detail.
 6. Output ONLY the section content with ## headings, no extra commentary{diagram_block}{no_ref}"""
 
     if section_key == "title_abstract":
@@ -523,7 +560,7 @@ WRITING RULES:
     return base
 
 
-def _peer_review_prompt(language: str, theme: str, section_heading: str, research_plan: str, findings: str, section_content: str) -> str:
+def _peer_review_prompt(language: str, theme: str, section_heading: str, research_plan: str, findings: str, section_content: str, previous_summary: str = "") -> str:
     if language == "id":
         return f"""Tema Penelitian: "{theme}"
 Bagian yang Dievaluasi: {section_heading}
@@ -534,6 +571,7 @@ Rencana Penelitian:
 Temuan dari Sumber:
 {findings or "(tidak ada temuan spesifik)"}
 
+{('Ringkasan isi bagian terdahulu (Working Memory):\\n' + previous_summary + '\\n---\\n') if previous_summary else ''}
 Naskah yang Ditulis:
 {section_content}
 
@@ -541,7 +579,7 @@ Naskah yang Ditulis:
 
 Tugas Anda sebagai Peer Reviewer:
 
-Evaluasi naskah di atas secara kritis berdasarkan 6 aspek berikut:
+Evaluasi naskah di atas secara kritis berdasarkan 7 aspek berikut:
 
 1. **Kesesuaian dengan Sumber** — Apakah analisis dan klaim dalam naskah sesuai dengan temuan dari paper? Beri contoh jika menyimpang.
 2. **Kesesuaian dengan Tema** — Apakah fokus naskah tetap pada tema penelitian? Apakah tidak melenceng?
@@ -549,6 +587,7 @@ Evaluasi naskah di atas secara kritis berdasarkan 6 aspek berikut:
 4. **Akurasi Sitasi** — Apakah setiap klaim didukung sitasi (Penulis, Tahun)? Apakah ada klaim tanpa sitasi?
 5. **Struktur dan Alur** — Apakah naskah terorganisir dengan baik dan mudah diikuti?
 6. **Kedalaman Analisis** — Apakah analisisnya cukup mendalam? Apakah ada bagian yang dangkal atau perlu dikembangkan lebih lanjut?
+7. **Redundansi dan Repetisi Semantik** — Periksa apakah naskah mengulang penjelasan, definisi konsep, atau materi yang sudah dibahas di bagian sebelumnya (lihat Ringkasan bagian terdahulu). Jika naskah mendefinisikan ulang istilah yang sudah dibahas atau mengulang narasi secara redundant, berikan rekomendasi REVISE untuk mengubahnya menjadi referensi silang (cross-reference) atau menghapusnya.
 
 Format evaluasi:
 - Untuk setiap aspek, tulis **PASS** atau **REVISE**.
@@ -567,6 +606,7 @@ Research Plan:
 Source Findings:
 {findings or "(no specific findings)"}
 
+{('Summary of previous sections (Working Memory):\\n' + previous_summary + '\\n---\\n') if previous_summary else ''}
 Written Section:
 {section_content}
 
@@ -574,7 +614,7 @@ Written Section:
 
 Your task as Peer Reviewer:
 
-Critically evaluate the section above based on 6 aspects:
+Critically evaluate the section above based on 7 aspects:
 
 1. **Source Alignment** — Does the analysis and claims match the source findings? Provide examples if misaligned.
 2. **Theme Alignment** — Does the section stay focused on the research theme? Does it avoid going off-topic?
@@ -582,6 +622,7 @@ Critically evaluate the section above based on 6 aspects:
 4. **Citation Accuracy** — Is every claim supported by a citation (Author, Year)? Are there claims without citations?
 5. **Structure & Flow** — Is the section well-organized and easy to follow?
 6. **Depth of Analysis** — Is the analysis deep enough? Are there areas that need more development?
+7. **Redundancy and Semantic Repetition** — Check if the manuscript repeats explanations, definitions, or material already covered in previous sections (refer to Summary of previous sections). If the manuscript redefines terms or repeats discussions redundantly, mark it as REVISE and instruct the writer to use cross-references or remove the repetition.
 
 Format:
 - For each aspect, write **PASS** or **REVISE**.
@@ -593,8 +634,16 @@ End with:
 """
 
 
-def _revision_prompt(language: str, theme: str, section_heading: str, research_plan: str, findings: str, section_content: str, peer_review: str, paper_list: str, previous: str) -> str:
+def _revision_prompt(language: str, theme: str, section_heading: str, research_plan: str, findings: str, section_content: str, peer_review: str, paper_list: str, prev_titles: str, previous_summary: str = "") -> str:
     if language == "id":
+        prev_block = ""
+        if prev_titles:
+            prev_block += f"Struktur bagian terdahulu:\n{prev_titles}\n"
+        if previous_summary:
+            prev_block += f"Ringkasan isi bagian terdahulu (Working Memory):\n{previous_summary}\n"
+        if prev_block:
+            prev_block = f"Bagian yang sudah ditulis sebelumnya:\n\n{prev_block}\n---\n\n"
+
         return f"""Tema Penelitian: "{theme}"
 Bagian: {section_heading}
 
@@ -604,8 +653,7 @@ Rencana Penelitian:
 Temuan dari Sumber:
 {findings or "(tidak ada temuan spesifik)"}
 
-{('Bagian yang sudah ditulis sebelumnya:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}
-
+{prev_block}
 DAFTAR REFERENSI:
 {paper_list}
 
@@ -626,13 +674,22 @@ Tugas Anda sebagai Lead Writer:
 Revisi naskah di ATAS berdasarkan umpan balik Peer Reviewer di ATAS.
 
 Petunjuk:
-1. Perbaiki SEMUA masalah yang diidentifikasi reviewer
+1. Perbaiki SEMUA masalah yang diidentifikasi reviewer (perhatikan aspek Redundansi dan Repetisi Semantik!)
 2. Pertahankan bagian yang sudah dinilai PASS
 3. Pastikan setiap klaim tetap punya sitasi (Penulis, Tahun)
 4. Tulis dengan kalimat ORISINAL — jangan copy dari sumber
 5. Gunakan heading ##
 
 Output ONLY naskah yang sudah direvisi dengan heading ##, tanpa komentar tambahan."""
+
+    prev_block = ""
+    if prev_titles:
+        prev_block += f"Structure of previous sections:\n{prev_titles}\n"
+    if previous_summary:
+        prev_block += f"Summary of previous sections (Working Memory):\n{previous_summary}\n"
+    if prev_block:
+        prev_block = f"Previously written sections:\n\n{prev_block}\n---\n\n"
+
     return f"""Research Theme: "{theme}"
 Section: {section_heading}
 
@@ -642,8 +699,7 @@ Research Plan:
 Source Findings:
 {findings or "(no specific findings)"}
 
-{('Previously written sections:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}
-
+{prev_block}
 PAPER LIST:
 {paper_list}
 
@@ -664,7 +720,7 @@ Your task as Lead Writer:
 Revise the section ABOVE based on the Peer Reviewer feedback ABOVE.
 
 Guidelines:
-1. Fix ALL issues identified by the reviewer
+1. Fix ALL issues identified by the reviewer (especially Redundancy and Semantic Repetition aspects)
 2. Keep parts that were rated PASS
 3. Ensure every claim still has a citation (Author, Year)
 4. Write ORIGINAL sentences — do not copy from sources
@@ -673,8 +729,16 @@ Guidelines:
 Output ONLY the revised section with ## headings, no extra commentary."""
 
 
-def _researcher_revision_prompt(language: str, theme: str, section_heading: str, old_plan: str, findings: str, section_content: str, peer_review: str, previous: str) -> str:
+def _researcher_revision_prompt(language: str, theme: str, section_heading: str, old_plan: str, findings: str, section_content: str, peer_review: str, prev_titles: str, previous_summary: str = "") -> str:
     if language == "id":
+        prev_block = ""
+        if prev_titles:
+            prev_block += f"Struktur bagian terdahulu:\n{prev_titles}\n"
+        if previous_summary:
+            prev_block += f"Ringkasan isi bagian terdahulu (Working Memory):\n{previous_summary}\n"
+        if prev_block:
+            prev_block = f"Bagian yang sudah ditulis sebelumnya:\n\n{prev_block}\n---\n\n"
+
         return f"""Tema Penelitian: "{theme}"
 Bagian: {section_heading}
 
@@ -690,7 +754,7 @@ Naskah yang Sudah Ditulis:
 UMBAN BALIK PEER REVIEWER:
 {peer_review}
 
-{('Bagian yang sudah ditulis sebelumnya:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}
+{prev_block}
 
 Tugas Anda sebagai Lead Researcher:
 
@@ -698,9 +762,18 @@ Tinjau rencana penelitian SEBELUMNYA dan umpan balik Peer Reviewer.
 Perbaiki rencana penelitian agar lebih sesuai dengan:
 1. Kritik dan saran dari Peer Reviewer
 2. Temuan dari sumber yang relevan
-3. Arah dan tujuan penelitian
+3. Arah dan tujuan penelitian (hindari merencanakan sub-topik yang berulang!)
 
 Keluarkan ONLY rencana penelitian yang sudah direvisi, tanpa komentar tambahan."""
+
+    prev_block = ""
+    if prev_titles:
+        prev_block += f"Structure of previous sections:\n{prev_titles}\n"
+    if previous_summary:
+        prev_block += f"Summary of previous sections (Working Memory):\n{previous_summary}\n"
+    if prev_block:
+        prev_block = f"Previously written sections:\n\n{prev_block}\n---\n\n"
+
     return f"""Research Theme: "{theme}"
 Section: {section_heading}
 
@@ -716,7 +789,7 @@ Written Section:
 PEER REVIEWER FEEDBACK:
 {peer_review}
 
-{('Previously written sections:\\n\\n' + previous + '\\n\\n---\\n\\n') if previous else ''}
+{prev_block}
 
 Your task as Lead Researcher:
 
@@ -724,7 +797,7 @@ Review the PREVIOUS research plan and the Peer Reviewer feedback.
 Revise the research plan to better align with:
 1. The Peer Reviewer's criticism and suggestions
 2. Relevant source findings
-3. The research direction and goals
+3. The research direction and goals (avoid planning redundant sub-topics!)
 
 Output ONLY the revised research plan, no extra commentary."""
 
@@ -775,6 +848,46 @@ Guidelines:
 7. **DO NOT** add or remove significant content — only improve the writing style.
 
 Output ONLY the humanized text with ## headings, no extra commentary."""
+
+
+def _summarize_section_prompt(language: str, heading: str, content: str) -> str:
+    if language == "id":
+        return f"""Berikut adalah bagian naskah yang baru saja selesai ditulis:
+Bagian: {heading}
+
+Konten:
+{content}
+
+---
+
+Tugas Anda sebagai Memory Updater:
+Buatlah ringkasan singkat (bullet-points) dari poin-poin penting, klaim utama, argumen, dan konsep/istilah yang didefinisikan secara eksplisit dalam bagian ini.
+Tujuan ringkasan ini adalah untuk menjadi "Working Memory" agar penulis bagian berikutnya tahu apa saja yang sudah dibahas dan menghindari repetisi atau definisi ulang.
+
+Format output (HANYA poin-poin berikut, maksimal 5 poin, tanpa intro/outro):
+- [Konsep/Istilah]: [Definisi singkat jika ada]
+- [Argumen/Temuan kunci 1]
+- [Argumen/Temuan kunci 2]
+...
+"""
+    return f"""Here is the section of the manuscript that was just completed:
+Section: {heading}
+
+Content:
+{content}
+
+---
+
+Your task as Memory Updater:
+Create a brief bullet-point summary of the key points, main claims, arguments, and explicitly defined concepts/terms in this section.
+The goal of this summary is to serve as "Working Memory" so writers of subsequent sections know what has already been discussed to avoid repetition or re-definition.
+
+Format output (ONLY the bullet points, max 5 points, no intro/outro):
+- [Concept/Term]: [Brief definition if any]
+- [Key argument/finding 1]
+- [Key argument/finding 2]
+...
+"""
 
 
 def _methodology_prompt(language: str, theme: str, paper_list: str, template: Optional[dict] = None) -> str:
@@ -1117,10 +1230,13 @@ async def generate_multi_agent(
 
     all_content = ""
     prev_titles = ""
+    global_memory = []
 
     for section_key in section_order:
         heading = headings[section_key]
         await log("Pipeline", f"Memproses bagian: {section_key} ({heading})")
+
+        previous_summary = "\n".join(global_memory)
 
         # Append methodology only to the Methods section
         section_template_ctx = template_ctx
@@ -1145,7 +1261,7 @@ async def generate_multi_agent(
         # 1. Lead Researcher
         await log("Lead Researcher", "Membuat rencana penelitian...")
         researcher_sys = section_template_ctx + SYSTEM_PROMPTS["lead_researcher"][lang]
-        task = _researcher_prompt(lang, section_key, theme, heading, rag, prev_titles)
+        task = _researcher_prompt(lang, section_key, theme, heading, rag, prev_titles, previous_summary=previous_summary)
         research_plan = await tracker.run(provider, researcher_sys, task)
         await log("Lead Researcher", f"Rencana selesai ({len(research_plan)} chars)")
 
@@ -1159,7 +1275,7 @@ async def generate_multi_agent(
         # 3. Lead Writer (first draft)
         await log("Lead Writer", "Menulis draf pertama...")
         writer_sys = section_template_ctx + SYSTEM_PROMPTS["lead_writer"][lang]
-        task = _writer_prompt(lang, section_key, theme, heading, research_plan, findings, word_target, prev_titles, paper_list, has_data, user_data)
+        task = _writer_prompt(lang, section_key, theme, heading, research_plan, findings, word_target, prev_titles, paper_list, previous_summary=previous_summary, has_data=has_data, user_data=user_data)
         section_content = await tracker.run(provider, writer_sys, task)
         await log("Lead Writer", f"Draf selesai ({len(section_content)} chars)")
 
@@ -1173,19 +1289,19 @@ async def generate_multi_agent(
         # 4. Peer Reviewer
         await log("Peer Reviewer", "Mengevaluasi naskah...")
         peer_sys = section_template_ctx + SYSTEM_PROMPTS["peer_reviewer"][lang]
-        task = _peer_review_prompt(lang, theme, heading, research_plan, findings, section_content_storied)
+        task = _peer_review_prompt(lang, theme, heading, research_plan, findings, section_content_storied, previous_summary=previous_summary)
         peer_review = await tracker.run(provider, peer_sys, task)
         await log("Peer Reviewer", f"Review selesai ({len(peer_review)} chars)")
 
         # 5. Lead Researcher (revision)
         await log("Lead Researcher", "Merevisi rencana berdasarkan review...")
-        research_revision_task = _researcher_revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, prev_titles)
+        research_revision_task = _researcher_revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, prev_titles, previous_summary=previous_summary)
         research_plan = await tracker.run(provider, researcher_sys, research_revision_task)
         await log("Lead Researcher", f"Rencana revisi selesai ({len(research_plan)} chars)")
 
         # 6. Lead Writer (revision)
         await log("Lead Writer", "Menulis draf revisi...")
-        task = _revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, paper_list, prev_titles)
+        task = _revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, paper_list, prev_titles, previous_summary=previous_summary)
         section_content = await tracker.run(provider, writer_sys, task)
         await log("Lead Writer", f"Draf revisi selesai ({len(section_content)} chars)")
 
@@ -1211,6 +1327,17 @@ async def generate_multi_agent(
         task = _humanizer_prompt(lang, theme, heading, section_content)
         section_content = await tracker.run(provider, humanizer_sys, task)
         await log("Humanizer", f"Selesai ({len(section_content)} chars)")
+
+        # 8b. Memory Updater (State Tracker)
+        await log("Memory Updater", "Memperbarui Working Memory global...")
+        if lang == "id":
+            summary_sys = "Anda adalah Memory Updater yang ahli dalam membuat ringkasan akademis singkat dan padat untuk menghindari repetisi."
+        else:
+            summary_sys = "You are a Memory Updater expert in creating concise, dense academic summaries to avoid repetition."
+        summary_task = _summarize_section_prompt(lang, heading, section_content)
+        section_summary = await tracker.run(provider, summary_sys, summary_task)
+        global_memory.append(f"### {heading}\n{section_summary}")
+        await log("Memory Updater", f"Working Memory diperbarui untuk {heading}")
 
         await log("Pipeline", f"Bagian {section_key} selesai")
         all_content += "\n\n" + section_content

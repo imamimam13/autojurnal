@@ -108,7 +108,7 @@
                             </div>
                             <div class="col-md-3">
                                 <label for="template-select" class="form-label">Template</label>
-                                <div class="input-group">
+                                <div class="input-group-responsive">
                                     <select class="form-select" id="template-select">
                                         <option value="">Default (no template)</option>
                                     </select>
@@ -118,22 +118,22 @@
                                     </button>
                                 </div>
                             </div>
-                            <div class="col-md-4 d-flex align-items-end">
-                                <div class="form-check">
+                            <div class="col-md-4 d-flex flex-wrap gap-3 align-items-end mt-3 mt-md-0">
+                                <div class="form-check mb-2 mb-md-0">
                                     <input type="checkbox" class="form-check-input" id="multi-agent"
                                         data-journal-only="true">
                                     <label class="form-check-label" for="multi-agent">Multi-Agent</label>
                                 </div>
-                                <div class="form-check ms-3">
+                                <div class="form-check mb-2 mb-md-0">
                                     <input type="checkbox" class="form-check-input" id="has-data"
                                         onchange="toggleDataInput()">
                                     <label class="form-check-label" for="has-data">📊 Has Data</label>
                                 </div>
-                                <div class="form-check ms-3">
+                                <div class="form-check mb-2 mb-md-0">
                                     <input type="checkbox" class="form-check-input" id="do-research">
                                     <label class="form-check-label" for="do-research">🔍 Research</label>
                                 </div>
-                                <div class="form-check ms-3">
+                                <div class="form-check mb-2 mb-md-0">
                                     <input type="checkbox" class="form-check-input" id="use-library">
                                     <label class="form-check-label" for="use-library">📚 Librarian</label>
                                 </div>
@@ -282,7 +282,7 @@ Or Markdown table:
 
                 <div id="collection-section" style="display:none;">
                     <div class="card mb-4">
-                        <div class="card-header d-flex justify-content-between align-items-center">
+                        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                             <span><i class="bi bi-collection me-2"></i>Paper Collection — <span id="collection-count">0</span> papers</span>
                             <button class="btn btn-sm btn-outline-danger" onclick="clearCollection()">
                                 <i class="bi bi-trash me-1"></i>Clear All
@@ -359,7 +359,7 @@ Or Markdown table:
 
                 <div id="restructure-detected-section" style="display:none;">
                     <div class="card mb-4">
-                        <div class="card-header d-flex justify-content-between align-items-center">
+                        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                             <span><i class="bi bi-list-columns me-2"></i>Detected Structure</span>
                             <span class="badge bg-info" id="restructure-section-count">0 sections</span>
                         </div>
@@ -372,7 +372,7 @@ Or Markdown table:
                             <div class="row g-3 align-items-end">
                                 <div class="col-md-6">
                                     <label for="restructure-template-select" class="form-label">Target Template</label>
-                                    <div class="input-group">
+                                    <div class="input-group-responsive">
                                         <select class="form-select" id="restructure-template-select">
                                             <option value="">Select a template...</option>
                                         </select>
@@ -430,7 +430,7 @@ Or Markdown table:
                         </h5>
                         <div class="mb-3">
                             <label class="form-label">Upload Reviewed Document</label>
-                            <div class="input-group mb-2">
+                            <div class="input-group-responsive mb-2">
                                 <input type="file" class="form-control" id="review-upload-input">
                                 <button class="btn btn-outline-primary" type="button" onclick="parseReviewedDocument()">
                                     <i class="bi bi-search me-1"></i> Parse
@@ -440,7 +440,7 @@ Or Markdown table:
                                     <i class="bi bi-x-circle"></i> Clear
                                 </button>
                             </div>
-                            <div class="input-group mb-2">
+                            <div class="input-group-responsive mb-2">
                                 <input type="text" class="form-control" id="review-link-input"
                                     placeholder="...atau Google Docs / Drive link → Parse otomatis">
                                 <button class="btn btn-outline-primary" onclick="parseReviewedDocument()">
@@ -514,18 +514,18 @@ Or Markdown table:
                             <small class="text-muted">Translate academic text while preserving structure, citations, and diagrams</small>
                         </div>
                         <div class="card-body">
-                            <div class="row g-3 mb-3">
-                                <div class="col-md-5">
+                            <div class="row g-2 mb-3 align-items-center">
+                                <div class="col-5">
                                     <label class="form-label fw-semibold">Source Language</label>
                                     <select class="form-select" id="translate-source-lang">
                                         <option value="en">English</option>
                                         <option value="id">Bahasa Indonesia</option>
                                     </select>
                                 </div>
-                                <div class="col-md-2 d-flex align-items-center justify-content-center py-3">
+                                <div class="col-2 d-flex align-items-center justify-content-center pt-4">
                                     <i class="bi bi-arrow-right fs-3 text-muted"></i>
                                 </div>
-                                <div class="col-md-5">
+                                <div class="col-5">
                                     <label class="form-label fw-semibold">Target Language</label>
                                     <select class="form-select" id="translate-target-lang">
                                         <option value="id">Bahasa Indonesia</option>
@@ -547,11 +547,11 @@ Or Markdown table:
 
                     <div id="translate-result-section" style="display:none;">
                         <div class="card shadow-sm border-0 mt-4">
-                            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <h5 class="mb-0"><i class="bi bi-check-circle text-success me-2"></i>Translation Result</h5>
-                                <div>
-                                    <span class="badge bg-info me-2" id="translate-token-badge"></span>
-                                    <button class="btn btn-sm btn-outline-primary me-1" onclick="copyTranslated()">
+                                <div class="d-flex flex-wrap gap-1 align-items-center">
+                                    <span class="badge bg-info me-2 align-self-center" id="translate-token-badge"></span>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="copyTranslated()">
                                         <i class="bi bi-clipboard"></i> Copy
                                     </button>
                                     <button class="btn btn-sm btn-outline-success" onclick="downloadTranslated()">
@@ -689,7 +689,7 @@ Or Markdown table:
 
                                 <div class="mb-3">
                                     <label for="idea-search-query" class="form-label">Query Pencarian Referensi Akademik Terkait (Bisa Diedit)</label>
-                                    <div class="input-group">
+                                    <div class="input-group-responsive">
                                         <input type="text" class="form-control" id="idea-search-query">
                                         <button class="btn btn-outline-primary" onclick="searchIdeaReferences()">
                                             <i class="bi bi-arrow-repeat me-1"></i>Perbarui Referensi
@@ -702,11 +702,16 @@ Or Markdown table:
                         <!-- References Curate Panel -->
                         <div class="card mb-4" id="idea-references-card" style="display: none;">
                             <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                                     <h5 class="card-title mb-0">
                                         <i class="bi bi-book me-2"></i>Referensi Akademik Terkait (OpenAlex)
                                     </h5>
-                                    <span class="badge bg-primary" id="idea-ref-count">0 ditemukan</span>
+                                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                                        <button class="btn btn-sm btn-outline-primary font-semibold" onclick="addSelectedToIdeaCollection()">
+                                            <i class="bi bi-plus-circle me-1"></i>Masukkan ke Koleksi Ide
+                                        </button>
+                                        <span class="badge bg-primary" id="idea-ref-count">0 ditemukan</span>
+                                    </div>
                                 </div>
                                 <div class="table-responsive" style="max-height: 350px;">
                                     <table class="table table-hover align-middle small" id="idea-ref-table">
@@ -722,8 +727,26 @@ Or Markdown table:
                                         <tbody></tbody>
                                     </table>
                                 </div>
+                            </div>
+                        </div>
 
-                                <div class="row g-3 mt-3 align-items-center">
+                        <!-- Idea Collection Section -->
+                        <div class="card mb-4" id="idea-collection-card" style="display: none;">
+                            <div class="card-header bg-light d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+                                <span class="font-semibold text-dark"><i class="bi bi-collection me-2 text-primary"></i>Koleksi Referensi Ide — <span id="idea-collection-count">0</span> papers</span>
+                                <button class="btn btn-sm btn-outline-danger" onclick="clearIdeaCollection()">
+                                    <i class="bi-trash me-1"></i>Kosongkan Koleksi
+                                </button>
+                            </div>
+                            <div class="card-body p-0" id="idea-collection-list">
+                                <!-- Paper list items injected here -->
+                            </div>
+                        </div>
+
+                        <!-- Idea Generation Control Card -->
+                        <div class="card mb-4" id="idea-gen-control-card" style="display: none;">
+                            <div class="card-body">
+                                <div class="row g-3 align-items-center">
                                     <div class="col-md-6">
                                         <div class="form-check form-switch font-semibold">
                                             <input class="form-check-input" type="checkbox" id="idea-do-research">
@@ -738,8 +761,8 @@ Or Markdown table:
                                             <label class="form-check-label" for="idea-multi-agent">Gunakan Multi-Agent Pipeline (10 Agen per Section)</label>
                                         </div>
                                     </div>
-                                    <div class="col-md-6 text-end">
-                                        <button class="btn btn-success btn-lg px-5" id="idea-generate-btn" onclick="generateFromIdea()">
+                                    <div class="col-md-6 text-md-end d-grid d-md-block mt-3 mt-md-0">
+                                        <button class="btn btn-success btn-lg px-5 font-semibold shadow-sm w-100 w-md-auto" id="idea-generate-btn" onclick="generateFromIdea()">
                                             <i class="bi bi-file-earmark-plus me-2"></i>Mulai Buat Jurnal Lengkap
                                         </button>
                                     </div>
@@ -752,7 +775,7 @@ Or Markdown table:
                     <div id="idea-output-panel" style="display: none;">
                         <!-- Streaming Logs -->
                         <div class="card mb-4">
-                            <div class="card-header d-flex justify-content-between align-items-center">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <span><i class="bi bi-terminal me-2"></i>Agent Processing Logs</span>
                                 <div class="spinner-border spinner-border-sm text-primary" id="idea-generation-spinner" style="display:none;"></div>
                             </div>
@@ -763,9 +786,9 @@ Or Markdown table:
 
                         <!-- Result Editor -->
                         <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <span><i class="bi bi-journal-richtext me-2"></i>Generated Document</span>
-                                <div>
+                                <div class="d-flex gap-1 flex-wrap">
                                     <button class="btn btn-sm btn-outline-secondary" onclick="copyIdeaResult()">
                                         <i class="bi bi-copy me-1"></i>Copy
                                     </button>
@@ -793,7 +816,7 @@ Or Markdown table:
                                 <div class="mb-4">
                                     <h6><i class="bi bi-upload me-2"></i>Create Template from Guidelines</h6>
                                     <p class="text-muted small">Upload a PDF, Word (.docx), or text file containing author guidelines from a journal. The system will extract the structure automatically.</p>
-                                    <div class="input-group">
+                                    <div class="input-group-responsive">
                                         <input type="file" class="form-control" id="template-upload" accept=".pdf,.docx,.txt,.md">
                                         <button class="btn btn-primary" onclick="uploadAndParseTemplate()">
                                             <i class="bi bi-magic me-1"></i>Parse & Create

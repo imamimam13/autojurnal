@@ -1187,7 +1187,7 @@ async def generate_multi_agent(
     paper_list = _get_paper_list(papers)
 
     # ---- Step 0: Methodology Analyst (runs once) ----
-    if paradigm and paradigm.lower() != "auto" and analysis_method and analysis_method.lower() != "auto":
+    if (paradigm and paradigm.lower() not in ("auto", "none")) and (analysis_method and analysis_method.lower() not in ("auto", "none")):
         await log("Methodology Analyst", f"Menggunakan paradigma '{paradigm}' dan metode '{analysis_method}' yang Anda pilih.")
         if lang == "id":
             methodology_context = (
@@ -1206,9 +1206,14 @@ async def generate_multi_agent(
         methodology_sys = SYSTEM_PROMPTS["methodology_analyst"][lang]
         
         task_prefix = ""
-        if paradigm and paradigm.lower() != "auto":
+        if paradigm and paradigm.lower() == "none":
+            task_prefix += "PENTING: Jangan gunakan atau tentukan paradigma penelitian khusus (lewati).\n" if lang == "id" else "IMPORTANT: Do not use or specify any specific research paradigm (skip).\n"
+        elif paradigm and paradigm.lower() != "auto":
             task_prefix += f"PENTING: Anda HARUS menggunakan Paradigma: {paradigm}.\n" if lang == "id" else f"IMPORTANT: You MUST use Paradigm: {paradigm}.\n"
-        if analysis_method and analysis_method.lower() != "auto":
+            
+        if analysis_method and analysis_method.lower() == "none":
+            task_prefix += "PENTING: Jangan gunakan atau tentukan metode analisis kualitatif/kuantitatif khusus (lewati).\n" if lang == "id" else "IMPORTANT: Do not use or specify any specific qualitative/quantitative analysis method (skip).\n"
+        elif analysis_method and analysis_method.lower() != "auto":
             task_prefix += f"PENTING: Anda HARUS menggunakan Metode Analisis: {analysis_method}.\n" if lang == "id" else f"IMPORTANT: You MUST use Analysis Method: {analysis_method}.\n"
 
         methodology_task = task_prefix + _methodology_prompt(lang, theme, paper_list, template)

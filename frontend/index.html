@@ -23,22 +23,54 @@
         <div class="row justify-content-center">
             <div class="col-lg-10">
 
-                <div class="btn-group mb-4 w-100" role="group">
-                    <button class="btn btn-outline-primary active" id="tab-generate-btn" onclick="showTab('generate')">
-                        <i class="bi bi-journal-text me-2"></i>Generate
-                    </button>
-                    <button class="btn btn-outline-primary" id="tab-restructure-btn" onclick="showTab('restructure')">
-                        <i class="bi bi-arrow-left-right me-2"></i>Restructure
-                    </button>
-                    <button class="btn btn-outline-primary" id="tab-review-btn" onclick="showTab('review')">
-                        <i class="bi bi-chat-dots me-2"></i>Review
-                    </button>
-                    <button class="btn btn-outline-primary" id="tab-translate-btn" onclick="showTab('translate')">
-                        <i class="bi bi-translate me-2"></i>Translate
-                    </button>
-                    <button class="btn btn-outline-primary" id="tab-idea-btn" onclick="showTab('idea')">
-                        <i class="bi bi-lightbulb me-2"></i>Ide ke Jurnal
-                    </button>
+                    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                    <div class="btn-group flex-grow-1" role="group">
+                        <button class="btn btn-outline-primary active" id="tab-generate-btn" onclick="showTab('generate')">
+                            <i class="bi bi-journal-text me-2"></i>Generate
+                        </button>
+                        <button class="btn btn-outline-primary" id="tab-restructure-btn" onclick="showTab('restructure')">
+                            <i class="bi bi-arrow-left-right me-2"></i>Restructure
+                        </button>
+                        <button class="btn btn-outline-primary" id="tab-review-btn" onclick="showTab('review')">
+                            <i class="bi bi-chat-dots me-2"></i>Review
+                        </button>
+                        <button class="btn btn-outline-primary" id="tab-translate-btn" onclick="showTab('translate')">
+                            <i class="bi bi-translate me-2"></i>Translate
+                        </button>
+                        <button class="btn btn-outline-primary" id="tab-idea-btn" onclick="showTab('idea')">
+                            <i class="bi bi-lightbulb me-2"></i>Ide ke Jurnal
+                        </button>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-outline-warning font-semibold" id="top-ai-settings-btn" onclick="openAISettingsModal()" title="Konfigurasi API Key Multi-Provider, Router & Load Balancing">
+                            <i class="bi bi-cpu-fill me-1"></i>AI Router & Keys
+                        </button>
+                        <button class="btn btn-outline-info font-semibold" id="top-drafts-btn" onclick="openDraftsModal()" title="Lihat riwayat draf naskah tersimpan">
+                            <i class="bi bi-folder2-open me-1"></i>Riwayat Draf <span class="badge bg-info text-dark ms-1" id="drafts-count-badge">0</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Checkpoint Resume Banner -->
+                <div id="resume-banner" class="card border-warning mb-4 shadow-sm" style="display:none; background: rgba(255, 193, 7, 0.08);">
+                    <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3 py-3">
+                        <div>
+                            <h6 class="mb-1 text-warning font-semibold">
+                                <i class="bi bi-arrow-clockwise me-2"></i>Draf Generasi Terputus Ditemukan!
+                            </h6>
+                            <p class="mb-0 text-muted small" id="resume-banner-text">
+                                Tema: <span id="resume-banner-theme" class="text-light fw-bold">-</span> — <span id="resume-banner-progress">-</span>
+                            </p>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-warning font-semibold btn-sm px-3" onclick="resumeActiveCheckpoint()">
+                                <i class="bi bi-play-fill me-1"></i>Lanjutkan Generasi
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="discardActiveCheckpoint()" title="Abaikan / Mulai Baru">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="tab-generate">
@@ -312,6 +344,12 @@ Or Markdown table:
                         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                             <span><i class="bi bi-journal-richtext me-2"></i>Generated <span id="result-label">Journal</span></span>
                             <div class="d-flex gap-1 flex-wrap">
+                                <button class="btn btn-sm btn-success font-semibold me-1" onclick="saveCurrentJournalDraft()" title="Simpan naskah ke riwayat draf">
+                                    <i class="bi bi-bookmark-check me-1"></i>Simpan Draf
+                                </button>
+                                <button class="btn btn-sm btn-outline-info me-1" onclick="addCurrentJournalToAiLibrary()" title="Daftarkan ke Library AI agar AI tidak plagiasi pada penulisan berikutnya">
+                                    <i class="bi bi-book-half me-1"></i>Library AI
+                                </button>
                                 <button class="btn btn-sm btn-outline-warning" onclick="regenerateJournal()" title="Generate ulang dengan pengaturan sama">
                                     <i class="bi bi-arrow-repeat me-1"></i>Regenerate
                                 </button>
@@ -396,6 +434,11 @@ Or Markdown table:
                                         <i class="bi bi-arrow-left-right me-1"></i>Restructure
                                     </button>
                                 </div>
+                            </div>
+                            <!-- Local loading indicator for Restructure tab -->
+                            <div id="restructure-loading" class="alert alert-info d-none align-items-center gap-3 my-3">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span id="restructure-loading-text">Sedang menyusun ulang naskah dengan template...</span>
                             </div>
                         </div>
                     </div>
@@ -485,6 +528,12 @@ Or Markdown table:
                                 </button>
                             </div>
                         </div>
+
+                        <!-- Local loading indicator for Review tab -->
+                        <div id="review-loading" class="alert alert-info d-none align-items-center gap-3 my-3">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                            <span id="review-loading-text">Sedang merevisi naskah dengan AI berdasarkan masukan reviewer...</span>
+                        </div>
                     </div>
                 </div>
 
@@ -544,6 +593,12 @@ Or Markdown table:
                                     <i class="bi bi-translate me-2"></i>Translate
                                 </button>
                             </div>
+
+                            <!-- Local loading indicator for Translate tab -->
+                            <div id="translate-loading" class="alert alert-info d-none align-items-center gap-3 my-3">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span id="translate-loading-text">Sedang menerjemahkan naskah dengan AI...</span>
+                            </div>
                         </div>
                     </div>
 
@@ -593,6 +648,40 @@ Or Markdown table:
                                 <label for="idea-sources-input" class="form-label font-semibold">Tambahkan Referensi/Sumber Manual (PDF, DOCX, TXT, MD - Bisa Pilih Banyak File)</label>
                                 <input type="file" class="form-control" id="idea-sources-input" accept=".pdf,.docx,.txt,.md" multiple>
                                 <div class="form-text">Opsional. File-file referensi manual ini akan di-parse dan dimasukkan ke daftar referensi di bawah untuk memperkuat analisis draf ide Anda.</div>
+                            </div>
+
+                            <!-- Search Topic & Filters for Direct/Draft Source Search -->
+                            <div class="card bg-dark-subtle border-secondary mb-3 p-3">
+                                <h6 class="mb-2 text-primary font-semibold"><i class="bi bi-search me-2"></i>Pencarian Sumber & Referensi Akademik (OpenAlex)</h6>
+                                <div class="mb-2">
+                                    <label for="idea-search-topic" class="form-label small text-muted">Topik / Kata Kunci Pencarian (Opsional - otomatis terisi jika menganalisis draf)</label>
+                                    <input type="text" class="form-control" id="idea-search-topic" placeholder="e.g., artificial intelligence in medical diagnosis">
+                                </div>
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <label for="idea-year-range" class="form-label small text-muted">Year Range</label>
+                                        <select class="form-select form-select-sm" id="idea-year-range">
+                                            <option value="1">Last 1 year</option>
+                                            <option value="2">Last 2 years</option>
+                                            <option value="3" selected>Last 3 years</option>
+                                            <option value="5">Last 5 years</option>
+                                            <option value="10">Last 10 years</option>
+                                            <option value="0">All time</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="idea-max-papers" class="form-label small text-muted">Max Papers</label>
+                                        <select class="form-select form-select-sm" id="idea-max-papers">
+                                            <option value="5">5 papers</option>
+                                            <option value="10">10 papers</option>
+                                            <option value="15" selected>15 papers</option>
+                                            <option value="20">20 papers</option>
+                                            <option value="30">30 papers</option>
+                                            <option value="50">50 papers</option>
+                                            <option value="100">100 papers</option>
+                                        </select>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="row g-3 mb-4">
@@ -672,9 +761,18 @@ Or Markdown table:
                                 </div>
                             </div>
 
-                            <button class="btn btn-primary btn-lg w-100" id="idea-analyze-btn" onclick="analyzeIdea()">
-                                <i class="bi bi-search me-2"></i>Analisis Draf Ide & Cari Referensi
-                            </button>
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <button class="btn btn-outline-primary btn-lg w-100" id="idea-direct-search-btn" onclick="searchDirectIdeaPapers()">
+                                        <i class="bi bi-search me-2"></i>Cari Sumber / Paper (OpenAlex)
+                                    </button>
+                                </div>
+                                <div class="col-md-6">
+                                    <button class="btn btn-primary btn-lg w-100" id="idea-analyze-btn" onclick="analyzeIdea()">
+                                        <i class="bi bi-magic me-2"></i>Analisis Draf & Cari Referensi
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -708,24 +806,27 @@ Or Markdown table:
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                                     <h5 class="card-title mb-0">
-                                        <i class="bi bi-book me-2"></i>Referensi Akademik Terkait (OpenAlex)
+                                        <i class="bi bi-book me-2"></i>Hasil Pencarian Referensi (OpenAlex)
                                     </h5>
                                     <div class="d-flex align-items-center gap-2 flex-wrap">
-                                        <button class="btn btn-sm btn-outline-primary font-semibold" onclick="addSelectedToIdeaCollection()">
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="toggleAllIdeaRefs()">
+                                            <i class="bi bi-check-all me-1"></i>Pilih Semua
+                                        </button>
+                                        <button class="btn btn-sm btn-primary font-semibold" onclick="addSelectedToIdeaCollection()">
                                             <i class="bi bi-plus-circle me-1"></i>Masukkan ke Koleksi Ide
                                         </button>
                                         <span class="badge bg-primary" id="idea-ref-count">0 ditemukan</span>
                                     </div>
                                 </div>
-                                <div class="table-responsive" style="max-height: 350px;">
+                                <div id="idea-papers-list" class="mb-3" style="max-height: 500px; overflow-y: auto;">
                                     <table class="table table-hover align-middle small" id="idea-ref-table">
                                         <thead>
                                             <tr>
                                                 <th style="width: 40px;"><input type="checkbox" id="idea-select-all" checked onchange="toggleAllIdeaRefs()"></th>
-                                                <th>Title</th>
-                                                <th>Authors & Year</th>
-                                                <th>Cites</th>
-                                                <th>Actions</th>
+                                                <th>Title & Metadata</th>
+                                                <th style="width: 150px;">Authors & Year</th>
+                                                <th style="width: 80px;">Cites</th>
+                                                <th style="width: 100px;">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody></tbody>
@@ -736,8 +837,8 @@ Or Markdown table:
 
                         <!-- Idea Collection Section -->
                         <div class="card mb-4" id="idea-collection-card" style="display: none;">
-                            <div class="card-header bg-light d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
-                                <span class="font-semibold text-dark"><i class="bi bi-collection me-2 text-primary"></i>Koleksi Referensi Ide — <span id="idea-collection-count">0</span> papers</span>
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+                                <span class="font-semibold"><i class="bi bi-collection me-2 text-primary"></i>Koleksi Referensi Ide — <span id="idea-collection-count">0</span> papers</span>
                                 <button class="btn btn-sm btn-outline-danger" onclick="clearIdeaCollection()">
                                     <i class="bi-trash me-1"></i>Kosongkan Koleksi
                                 </button>
@@ -784,7 +885,7 @@ Or Markdown table:
                                 <div class="spinner-border spinner-border-sm text-primary" id="idea-generation-spinner" style="display:none;"></div>
                             </div>
                             <div class="card-body">
-                                <div id="idea-generation-logs" class="logs-container p-3 font-monospace bg-light rounded text-dark" style="max-height: 250px; overflow-y: auto;"></div>
+                                <div id="idea-generation-logs" class="logs-container p-3 font-monospace rounded" style="max-height: 250px; overflow-y: auto;"></div>
                             </div>
                         </div>
 
@@ -793,6 +894,12 @@ Or Markdown table:
                             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <span><i class="bi bi-journal-richtext me-2"></i>Generated Document</span>
                                 <div class="d-flex gap-1 flex-wrap">
+                                    <button class="btn btn-sm btn-success font-semibold" onclick="saveCurrentIdeaDraft()" title="Simpan naskah ke riwayat draf">
+                                        <i class="bi bi-bookmark-check me-1"></i>Simpan Draf
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-info" onclick="addCurrentIdeaToAiLibrary()" title="Daftarkan ke Library AI agar AI tidak plagiasi pada penulisan berikutnya">
+                                        <i class="bi bi-book-half me-1"></i>Library AI
+                                    </button>
                                     <button class="btn btn-sm btn-outline-secondary" onclick="copyIdeaResult()">
                                         <i class="bi bi-copy me-1"></i>Copy
                                     </button>
@@ -802,7 +909,7 @@ Or Markdown table:
                                 </div>
                             </div>
                             <div class="card-body">
-                                <textarea id="idea-output-editor" class="form-control font-monospace p-3 bg-light rounded text-dark" style="height: 500px;"></textarea>
+                                <textarea id="idea-output-editor" class="form-control font-monospace p-3 rounded" style="height: 500px;"></textarea>
                             </div>
                         </div>
                     </div>
@@ -849,6 +956,112 @@ Or Markdown table:
                             </div>
                             <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Settings & Multi-Key Router Modal -->
+                <div class="modal fade" id="aiSettingsModal" tabindex="-1">
+                    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                        <div class="modal-content">
+                            <div class="modal-header bg-dark-subtle py-3">
+                                <h5 class="modal-title font-semibold text-warning">
+                                    <i class="bi bi-cpu-fill me-2"></i>AI Router & Multi-Key Settings
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body p-4">
+                                <p class="text-muted small mb-3">
+                                    Konfigurasikan API Key untuk semua provider global, China AI (DeepSeek, Qwen, Xiaomi MiMo, dll.), serta model lokal. Anda dapat memasukkan <strong>beberapa API Key sekaligus</strong> (pisahkan dengan koma atau baris baru) untuk mengaktifkan fitur <strong>Smart Round-Robin & Auto-Failover</strong> jika salah satu key mencapai batas rate limit.
+                                </p>
+
+                                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+                                    <!-- Category Filters -->
+                                    <div class="btn-group btn-group-sm" role="group" id="ai-category-filters">
+                                        <button type="button" class="btn btn-outline-primary active" onclick="filterAICategory('all', this)">Semua Provider</button>
+                                        <button type="button" class="btn btn-outline-primary" onclick="filterAICategory('global', this)">🟢 NVIDIA & Global</button>
+                                        <button type="button" class="btn btn-outline-primary" onclick="filterAICategory('china', this)">🇨🇳 China AI & MiMo</button>
+                                        <button type="button" class="btn btn-outline-primary" onclick="filterAICategory('router', this)">🔀 Routers / Proxy</button>
+                                        <button type="button" class="btn btn-outline-primary" onclick="filterAICategory('local', this)">💻 Local AI / Ollama</button>
+                                    </div>
+
+                                    <!-- Search Provider -->
+                                    <div style="max-width: 250px;">
+                                        <input type="text" class="form-control form-control-sm" id="ai-provider-search" placeholder="Cari provider / model..." oninput="filterAIProviderList()">
+                                    </div>
+                                </div>
+
+                                <!-- Router Global Strategy Card -->
+                                <div class="card bg-body-tertiary border-warning mb-4 p-3 shadow-sm">
+                                    <div class="row g-3 align-items-center">
+                                        <div class="col-md-6">
+                                            <label class="form-label font-semibold mb-1"><i class="bi bi-shuffle me-1"></i>Strategi Load Balancing Multi-Key</label>
+                                            <select class="form-select form-select-sm" id="ai-router-strategy">
+                                                <option value="round-robin" selected>Round-Robin (Bergantian key per panggilan agen)</option>
+                                                <option value="failover">Failover Only (Gunakan Key 1 sampai error/limit, baru pindah)</option>
+                                                <option value="random">Random (Pilih key secara acak)</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="small text-muted pt-2">
+                                                <i class="bi bi-shield-check text-success me-1"></i><strong>Shared Context Carryover</strong>: Otomatis menjaga seluruh riwayat bab, RAG, dan hasil analisa agar tetap utuh saat berganti key atau berpindah provider.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Provider Cards Container -->
+                                <div id="ai-providers-container" class="row g-3">
+                                    <div class="col-12 text-center py-4 text-muted">Memuat katalog AI provider...</div>
+                                </div>
+                            </div>
+                            <div class="modal-footer bg-dark-subtle d-flex justify-content-between">
+                                <span class="small text-muted" id="ai-settings-status">Siap menyimpan konfigurasi</span>
+                                <div>
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+                                    <button type="button" class="btn btn-warning font-semibold px-4" onclick="saveAllAISettings()">
+                                        <i class="bi bi-floppy me-1"></i>Simpan Pengaturan
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Saved Drafts & AI Library Modal -->
+                <div class="modal fade" id="draftsModal" tabindex="-1">
+                    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">
+                                    <i class="bi bi-folder2-open me-2 text-info"></i>Riwayat Draf Naskah & Library AI
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="row g-2 align-items-center mb-3">
+                                    <div class="col-md-6">
+                                        <div class="input-group">
+                                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                            <input type="text" class="form-control" id="drafts-search-input" placeholder="Cari draf berdasarkan tema / kata kunci..." oninput="filterDraftsList()">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6 text-md-end d-flex justify-content-md-end gap-2 flex-wrap">
+                                        <button class="btn btn-sm btn-outline-info" onclick="syncAiLibraryDrafts()">
+                                            <i class="bi bi-arrow-repeat me-1"></i>Sinkron Library AI
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" onclick="clearAllDrafts()">
+                                            <i class="bi bi-trash me-1"></i>Kosongkan Riwayat
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="drafts-list-container">
+                                    <div class="text-center py-4 text-muted">Memuat daftar draf...</div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
                             </div>
                         </div>
                     </div>

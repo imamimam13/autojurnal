@@ -1,5 +1,6 @@
 from typing import Optional
 from search.openalex import Paper
+from .memory import compact_previous_content, truncate_context_budget
 
 
 BASE_TEMPLATE_EN = """Write an ORIGINAL qualitative research journal article on the given theme. The papers below are your REFERENCES — cite them as sources, but write EVERYTHING in your own original words and sentence structures.
@@ -285,13 +286,14 @@ def build_part_prompt(
         )
     else:
         brief_note = f"This journal is based on {len(papers)} papers about \"{theme}\". All papers are listed in Part 1."
+        compacted_previous = compact_previous_content(previous_content or "", max_chars=8000, lang=language)
         prompt = (
             f"{brief_note}{rag_block}\n\n"
-            f"ALREADY WRITTEN (previous parts of the journal):\n\n{previous_content}\n\n"
+            f"ALREADY WRITTEN (previous parts of the journal):\n\n{compacted_previous}\n\n"
             f"---\n\n"
             + draft_block
             + section_info["instruction"]
-            + diagram_instruction(has_data, language, user_data, content=(previous_content or "") + (rag_context or ""))
+            + diagram_instruction(has_data, language, user_data, content=(compacted_previous or "") + (rag_context or ""))
             + no_ref
             + "\n\nContinue from where the previous part left off. Do NOT repeat sections already written. Output ONLY the new sections."
         )

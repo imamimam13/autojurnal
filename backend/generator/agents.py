@@ -5,6 +5,7 @@ from typing import Optional
 from search.openalex import Paper
 from providers.base import LLMProvider
 from rag.store import store
+from .memory import RollingMemory, truncate_context_budget, is_context_overflow_error, compress_prompt_for_retry
 
 
 DEFAULT_SECTION_ORDER = [
@@ -139,7 +140,12 @@ SYSTEM_PROMPTS = {
             "konstruktivisme, teori kritis, pragmatisme) dan metode analisis "
             "(tematik, grounded theory, fenomenologi, naratif, etnografi, studi kasus, "
             "regresi, SEM, ANOVA, analisis konten, dan lain-lain). "
-            "Anda selalu memberikan rekomendasi yang spesifik, logis, dan dapat dipertanggungjawabkan secara ilmiah."
+            "Anda selalu memberikan rekomendasi yang spesifik, logis, dan dapat dipertanggungjawabkan secara ilmiah. "
+            "**Kolaborasi:** Anda adalah titik awal tim penulisan. Keputusan Anda menjadi fondasi "
+            "untuk Lead Researcher (penyusun rencana), Source Reviewer (pemilih sumber), dan Lead Writer (penulis). "
+            "Berikan justifikasi metodologi yang jelas agar agen lain memahami 'mengapa' memilih pendekatan ini. "
+            "**Prinsip:** Spesifik dan logis. Jangan berikan opsi ganda yang membingungkan — pilih SATU arah "
+            "metodologi yang paling tepat dan pertanggungjawabkan secara ilmiah."
         ),
         "en": (
             "You are a Methodology Analyst specialized in research methodology. "
@@ -149,43 +155,84 @@ SYSTEM_PROMPTS = {
             "constructivism, critical theory, pragmatism) and analysis methods "
             "(thematic, grounded theory, phenomenology, narrative, ethnography, case study, "
             "regression, SEM, ANOVA, content analysis, etc.). "
-            "You always give specific, logical, and scientifically justifiable recommendations."
+            "You always give specific, logical, and scientifically justifiable recommendations. "
+            "**Collaboration:** You are the starting point of the writing team. Your decision becomes the "
+            "foundation for the Lead Researcher (plan builder), Source Reviewer (source selector), and Lead Writer (writer). "
+            "Provide a clear methodology justification so other agents understand 'why' this approach was chosen. "
+            "**Principle:** Be specific and logical. Do not offer confusing multiple options — choose ONE "
+            "methodology direction that is most appropriate and justify it scientifically."
         ),
     },
     "lead_researcher": {
         "id": (
             "Anda adalah Lead Researcher yang ahli dalam metodologi penelitian kualitatif. "
             "Tugas Anda adalah merencanakan bagian-bagian jurnal akademik secara sistematis. "
-            "Anda selalu berpikir kritis, mendalam, dan terstruktur."
+            "Anda selalu berpikir kritis, mendalam, dan terstruktur. "
+            "**Kolaborasi:** Anda menerjemahkan keputusan metodologi dari Methodology Analyst "
+            "menjadi rencana penulisan yang konkret. Rencana Anda menjadi bahan untuk Source Reviewer "
+            "(menyintesis sumber) dan Lead Writer (menulis). "
+            "Gunakan Working Memory dari bagian sebelumnya untuk menghindari perencanaan sub-topik yang berulang. "
+            "**Prinsip:** Rencana harus fokus pada sub-topik baru, terstruktur, dan siap dieksekusi "
+            "oleh penulis — bukan daftar konsep yang kabur."
         ),
         "en": (
             "You are a Lead Researcher specializing in qualitative research methodology. "
             "Your role is to systematically plan academic journal sections. "
-            "You always think critically, deeply, and in a structured manner."
+            "You always think critically, deeply, and in a structured manner. "
+            "**Collaboration:** You translate the methodology decision from the Methodology Analyst "
+            "into a concrete writing plan. Your plan becomes the source material for the Source Reviewer "
+            "(synthesizing sources) and the Lead Writer (writing). "
+            "Use Working Memory from previous sections to avoid planning redundant sub-topics. "
+            "**Principle:** The plan must focus on new sub-topics, be structured, and be ready to be executed "
+            "by the writer — not a vague list of concepts."
         ),
     },
     "source_reviewer": {
         "id": (
             "Anda adalah Source Reviewer yang ahli dalam menganalisis literatur akademik. "
             "Tugas Anda adalah menyintesis temuan-temuan dari paper yang relevan dengan rencana penelitian. "
-            "Anda selalu mengekstrak fakta, data, dan argumen kunci — bukan menulis ulang konten."
+            "Anda selalu mengekstrak fakta, data, dan argumen kunci — bukan menulis ulang konten. "
+            "**Kolaborasi:** Anda adalah jembatan antara rencana (dari Lead Researcher) dan tulisan "
+            "(untuk Lead Writer). Sintesis Anda harus berpusat pada argumen rencana penelitian, "
+            "bukan sekadar daftar paper. Beri tahu Lead Writer temuan mana yang benar-benar mendukung "
+            "setiap poin rencana. "
+            "**Prinsip:** Sintesis, bukan daftar. Diintegrasikan berdasarkan tema/alur argumen, "
+            "dengan sitasi (Penulis, Tahun) dan fokus pada fakta konkret serta data."
         ),
         "en": (
             "You are a Source Reviewer skilled in analyzing academic literature. "
             "Your role is to synthesize findings from relevant papers according to the research plan. "
-            "You always extract key facts, data, and arguments — not rewrite content."
+            "You always extract key facts, data, and arguments — not rewrite content. "
+            "**Collaboration:** You are the bridge between the plan (from Lead Researcher) and the writing "
+            "(for Lead Writer). Your synthesis must center on the research plan's arguments, "
+            "not merely a list of papers. Tell the Lead Writer which findings truly support "
+            "each plan point. "
+            "**Principle:** Synthesize, don't list. Integrate by theme/argument flow, "
+            "with citations (Author, Year) and focus on concrete facts and data."
         ),
     },
     "lead_writer": {
         "id": (
             "Anda adalah Lead Writer yang ahli dalam menulis jurnal akademik kualitatif. "
             "Tugas Anda adalah menulis bagian jurnal berdasarkan rencana penelitian dan temuan yang telah disintesis. "
-            "Anda selalu menulis dengan kalimat orisinal, gaya akademik yang ketat, dan sitasi yang akurat."
+            "Anda selalu menulis dengan kalimat orisinal, gaya akademik yang ketat, dan sitasi yang akurat. "
+            "**Kolaborasi:** Anda bergantung pada rencana (dari Lead Researcher) dan sintesis temuan "
+            "(dari Source Reviewer). Tulisan Anda kemudian diverifikasi oleh Peer Reviewer. "
+            "Gunakan Working Memory untuk menghindari definisi ulang konsep yang sudah dibahas — "
+            "gunakan referensi silang (cross-reference) alih-alih mengulang penjelasan. "
+            "**Prinsip:** Tulis sintesis teoretis yang aktif, variasi narasi & anti-repetisi, "
+            "setiap klaim wajib bersitasi, dan hindari tone AI yang kaku."
         ),
         "en": (
             "You are a Lead Writer skilled in composing qualitative academic journals. "
             "Your role is to write journal sections based on the research plan and synthesized findings. "
-            "You always write original sentences in strict academic style with accurate citations."
+            "You always write original sentences in strict academic style with accurate citations. "
+            "**Collaboration:** You depend on the plan (from Lead Researcher) and the findings synthesis "
+            "(from Source Reviewer). Your writing is then verified by the Peer Reviewer. "
+            "Use Working Memory to avoid redefining concepts already covered — "
+            "use cross-references instead of repeating explanations. "
+            "**Principle:** Write active theoretical synthesis, vary narration & avoid repetition, "
+            "every claim must be cited, and avoid a stiff AI tone."
         ),
     },
     "peer_reviewer": {
@@ -197,7 +244,13 @@ SYSTEM_PROMPTS = {
             "(3) orisinalitas tulisan (bukan hasil copy-paste), "
             "(4) kedalaman analisis, dan "
             "(5) akurasi sitasi. "
-            "Anda memberikan kritik konstruktif yang spesifik dan actionable."
+            "Anda memberikan kritik konstruktif yang spesifik dan actionable. "
+            "**Kolaborasi:** Anda adalah auditor kualitas dalam tim. Anda meninjau output Lead Writer "
+            "menggunakan rencana (dari Lead Researcher) dan temuan (dari Source Reviewer) sebagai pembanding. "
+            "Fokus pada 3 kelemahan utama AI: halusinasi sitasi, redundansi, dan lompatan logika. "
+            "Penilaian Anda menjadi bahan revisi bagi Lead Writer dan Lead Researcher. "
+            "**Prinsip:** Objektif, spesifik, dan actionable. Beri PASS/REVISE dengan alasan dan saran "
+            "perbaikan yang konkret berdasarkan fakta naskah."
         ),
         "en": (
             "You are a highly critical, thorough, and objective Peer Reviewer. "
@@ -207,7 +260,13 @@ SYSTEM_PROMPTS = {
             "(3) originality of writing (not copy-pasted), "
             "(4) depth of analysis, and "
             "(5) citation accuracy. "
-            "You provide constructive, specific, and actionable criticism."
+            "You provide constructive, specific, and actionable criticism. "
+            "**Collaboration:** You are the quality auditor of the team. You review the Lead Writer's output "
+            "using the plan (from Lead Researcher) and findings (from Source Reviewer) as baselines. "
+            "Focus on the 3 main AI weaknesses: citation hallucination, redundancy, and logic leaps. "
+            "Your assessment becomes material for revision for the Lead Writer and Lead Researcher. "
+            "**Principle:** Objective, specific, and actionable. Give PASS/REVISE with concrete reasons "
+            "and suggestions based on the manuscript's facts."
         ),
     },
     "lead_story": {
@@ -218,7 +277,12 @@ SYSTEM_PROMPTS = {
             "tanpa mengorbankan ketelitian ilmiah. Anda mengubah data dan temuan "
             "menjadi narasi yang hidup dan mudah dipahami. "
             "Anda BUKAN mengubah fakta — Anda menyajikannya dengan gaya bercerita "
-            "yang tetap akademik dan profesional."
+            "yang tetap akademik dan profesional. "
+            "**Kolaborasi:** Anda bekerja setelah Lead Writer dan Peer Reviewer, memperkaya naskah yang sudah "
+            "valid tanpa merusak strukturnya. Anda juga melengkapi Lead Layouter dengan konteks naratif "
+            "untuk memilih visual yang tepat, dan bekerja sama dengan Humanizer dalam gaya bahasa. "
+            "**Prinsip:** Jangan ubah fakta atau data. HANYA tambahkan elemen naratif dan deskriptif — "
+            "bukan klaim ilmiah baru. Kalimat tetap akademik dan profesional."
         ),
         "en": (
             "You are a Lead Storyteller specialized in presenting research "
@@ -227,7 +291,12 @@ SYSTEM_PROMPTS = {
             "without sacrificing scientific rigor. You transform data and findings "
             "into vivid, easy-to-understand narratives. "
             "You do NOT change facts — you present them in a storytelling style "
-            "that remains academic and professional."
+            "that remains academic and professional. "
+            "**Collaboration:** You work after the Lead Writer and Peer Reviewer, enriching the already-valid "
+            "manuscript without breaking its structure. You also complement the Lead Layouter with narrative "
+            "context for choosing the right visuals, and work with the Humanizer on language style. "
+            "**Principle:** Do not change facts or data. ONLY add narrative and descriptive elements — "
+            "no new scientific claims. Keep the sentences academic and professional."
         ),
     },
     "lead_layouter": {
@@ -242,7 +311,13 @@ SYSTEM_PROMPTS = {
             "- Ubah data tren temporal menjadi line chart.\n"
             "- Ubah proporsi/persentase menjadi pie chart.\n"
             "- Gunakan flowchart/concept_map untuk proses, hubungan kausal, dan hierarki.\n"
-            "- Gunakan tabel markdown untuk data tabular yang padat."
+            "- Gunakan tabel markdown untuk data tabular yang padat. "
+            "**Integrasi dengan Humanizer:** Visual tidak boleh mengganggu struktur heading yang sudah "
+            "ditetapkan Lead Writer; Humanizer memastikan gaya bahasa di sekitar visual tetap alami. "
+            "**Kolaborasi:** Anda bekerja pada naskah yang sudah ditulis Lead Writer dan direvisi Peer Reviewer. "
+            "Gunakan konteks naratif dari Lead Storyteller untuk memilih visual yang paling melengkapi cerita. "
+            "**Prinsip:** HANYA tambah visual jika benar-benar meningkatkan pemahaman. JANGAN geser atau hapus "
+            "heading ## yang sudah ada. Validasi JSON diagram sebelum output — periksa koma, tanda kutip, dan kurung."
         ),
         "en": (
             "You are a Lead Layouter specialized in academic data visualization. "
@@ -255,7 +330,14 @@ SYSTEM_PROMPTS = {
             "- Convert temporal trends into line charts.\n"
             "- Convert proportions/percentages into pie charts.\n"
             "- Use flowcharts/concept_maps for processes, causal relationships, and hierarchies.\n"
-            "- Use markdown tables for dense tabular data."
+            "- Use markdown tables for dense tabular data. "
+            "**Integration with Humanizer:** Visuals must not disrupt the heading structure already set by "
+            "the Lead Writer; the Humanizer ensures the language around visuals stays natural. "
+            "**Collaboration:** You work on the manuscript already written by the Lead Writer and revised by the "
+            "Peer Reviewer. Use narrative context from the Lead Storyteller to pick visuals that best complement "
+            "the story. "
+            "**Principle:** ONLY add visuals when they truly improve understanding. NEVER shift or remove existing "
+            "## headings. Validate the diagram JSON before output — check commas, quotes, and brackets."
         ),
     },
     "humanizer": {
@@ -264,14 +346,28 @@ SYSTEM_PROMPTS = {
             "alami dan manusiawi. Tugas Anda adalah merevisi naskah jurnal agar terbaca "
             "seperti tulisan manusia, bukan AI. Anda mempertahankan makna, struktur, "
             "dan sitasi, tetapi memperbaiki pola kalimat yang kaku, repetitif, atau "
-            "terlalu formal sehingga terdengar lebih alami dan mengalir."
+            "terlalu formal sehingga terdengar lebih alami dan mengalir. "
+            "**Penting:** Anda adalah LAST LAYER. Jangan pernah merusak struktur yang sudah dibangun oleh: "
+            "Lead Writer (struktur konten & argumen), Peer Reviewer (aspek revisi yang disepakati), "
+            "atau Lead Layouter (posisi heading & visual). "
+            "**Kolaborasi:** Tugas Anda adalah menyempurnakan gaya bahasa dari OUTPUT FINAL yang sudah valid. "
+            "Cari frasa klise AI dan ubah menjadi gaya manusia — tanpa mengurangi bobot akademisnya. "
+            "**Prinsip:** Pertahankan SEMUA heading ##, sitasi (Penulis, Tahun), dan fakta/data asli. "
+            "JANGAN menambah atau menghapus konten signifikan — hanya perbaiki gaya bahasa."
         ),
         "en": (
             "You are a Humanizer specialized in making academic text sound natural "
             "and human-like. Your role is to revise journal manuscripts so they read "
             "like human writing, not AI-generated. You preserve meaning, structure, "
             "and citations, but fix stiff, repetitive, or overly formal sentence "
-            "patterns to make the text flow naturally."
+            "patterns to make the text flow naturally. "
+            "**Critical:** You are the LAST LAYER. Do not ever disrupt the structure built by: "
+            "the Lead Writer (content & argument structure), the Peer Reviewer (agreed revision aspects), "
+            "or the Lead Layouter (heading & visual positioning). "
+            "**Collaboration:** Your job is to refine the style of the already-valid FINAL output. "
+            "Find AI cliché phrases and turn them into human style — without reducing academic weight. "
+            "**Principle:** Preserve ALL ## headings, citations (Author, Year), and facts/data from the original. "
+            "DO NOT add or remove significant content — only improve the writing style."
         ),
     },
 }
@@ -288,9 +384,17 @@ class TokenTracker:
     def estimate(text: str) -> int:
         return max(1, len(text) // 4)
 
-    async def run(self, provider: LLMProvider, system: str, task: str) -> str:
+    async def run(self, provider: LLMProvider, system: str, task: str, lang: str = "id") -> str:
         input_tokens = self.estimate(system) + self.estimate(task)
-        result = await provider.generate(task, system_prompt=system)
+        try:
+            result = await provider.generate(task, system_prompt=system)
+        except Exception as e:
+            if is_context_overflow_error(e):
+                print(f"[ContextOverflow] Provider '{provider.name}' error: {e}. Compacting prompt for self-healing retry...")
+                compressed_sys, compressed_task = compress_prompt_for_retry(system, task, lang=lang)
+                result = await provider.generate(compressed_task, system_prompt=compressed_sys)
+            else:
+                raise
         output_tokens = self.estimate(result)
         self.total_input += input_tokens
         self.total_output += output_tokens
@@ -372,6 +476,8 @@ def _format_template_sections(template: Optional[dict], lang: str) -> str:
 
 
 def _researcher_prompt(language: str, section_key: str, theme: str, section_heading: str, rag: str, prev_titles: str, previous_summary: str = "", template: Optional[dict] = None) -> str:
+    rag = truncate_context_budget(rag, max_chars=3500)
+    previous_summary = truncate_context_budget(previous_summary, max_chars=3500)
     template_block = _format_template_sections(template, language)
     template_block += _format_template_constraints(template, language)
     if language == "id":
@@ -437,6 +543,8 @@ Output ONLY the research plan, no extra commentary."""
 
 
 def _reviewer_prompt(language: str, section_key: str, theme: str, section_heading: str, research_plan: str, rag: str) -> str:
+    research_plan = truncate_context_budget(research_plan, max_chars=3000)
+    rag = truncate_context_budget(rag, max_chars=3500)
     if language == "id":
         return f"""Tema Penelitian: "{theme}"
 Bagian: {section_heading}
@@ -477,6 +585,11 @@ Output ONLY the synthesized findings, organized by theme."""
 
 
 def _writer_prompt(language: str, section_key: str, theme: str, section_heading: str, research_plan: str, findings: str, word_target: str, prev_titles: str, paper_list: str, previous_summary: str = "", has_data: bool = False, user_data: Optional[str] = None) -> str:
+    research_plan = truncate_context_budget(research_plan, max_chars=3000)
+    findings = truncate_context_budget(findings, max_chars=3500)
+    previous_summary = truncate_context_budget(previous_summary, max_chars=3500)
+    user_data = truncate_context_budget(user_data, max_chars=3000) if user_data else None
+
     from diagrams.prompts import diagram_instruction
     diagram_block = diagram_instruction(has_data, language, user_data, content=findings + "\n" + prev_titles)
 
@@ -561,6 +674,11 @@ IMPORTANT: Strictly forbidden to redefine terms or concepts already discussed/de
 
 
 def _peer_review_prompt(language: str, theme: str, section_heading: str, research_plan: str, findings: str, section_content: str, previous_summary: str = "") -> str:
+    research_plan = truncate_context_budget(research_plan, max_chars=2500)
+    findings = truncate_context_budget(findings, max_chars=2500)
+    previous_summary = truncate_context_budget(previous_summary, max_chars=3000)
+    section_content = truncate_context_budget(section_content, max_chars=12000)
+
     if language == "id":
         return f"""Tema Penelitian: "{theme}"
 Bagian yang Dievaluasi: {section_heading}
@@ -571,7 +689,7 @@ Rencana Penelitian:
 Temuan dari Sumber:
 {findings or "(tidak ada temuan spesifik)"}
 
-{('Ringkasan isi bagian terdahulu (Working Memory):\\n' + previous_summary + '\\n---\\n') if previous_summary else ''}
+{('Ringkasan isi bagian terdahulu (Working Memory):\n' + previous_summary + '\n---\n') if previous_summary else ''}
 Naskah yang Ditulis:
 {section_content}
 
@@ -606,7 +724,7 @@ Research Plan:
 Source Findings:
 {findings or "(no specific findings)"}
 
-{('Summary of previous sections (Working Memory):\\n' + previous_summary + '\\n---\\n') if previous_summary else ''}
+{('Summary of previous sections (Working Memory):\n' + previous_summary + '\n---\n') if previous_summary else ''}
 Written Section:
 {section_content}
 
@@ -635,6 +753,12 @@ End with:
 
 
 def _revision_prompt(language: str, theme: str, section_heading: str, research_plan: str, findings: str, section_content: str, peer_review: str, paper_list: str, prev_titles: str, previous_summary: str = "") -> str:
+    research_plan = truncate_context_budget(research_plan, max_chars=2500)
+    findings = truncate_context_budget(findings, max_chars=2500)
+    peer_review = truncate_context_budget(peer_review, max_chars=2500)
+    previous_summary = truncate_context_budget(previous_summary, max_chars=3000)
+    section_content = truncate_context_budget(section_content, max_chars=12000)
+
     if language == "id":
         prev_block = ""
         if prev_titles:
@@ -730,6 +854,12 @@ Output ONLY the revised section with ## headings, no extra commentary."""
 
 
 def _researcher_revision_prompt(language: str, theme: str, section_heading: str, old_plan: str, findings: str, section_content: str, peer_review: str, prev_titles: str, previous_summary: str = "") -> str:
+    old_plan = truncate_context_budget(old_plan, max_chars=2500)
+    findings = truncate_context_budget(findings, max_chars=2500)
+    peer_review = truncate_context_budget(peer_review, max_chars=2500)
+    previous_summary = truncate_context_budget(previous_summary, max_chars=3000)
+    section_content = truncate_context_budget(section_content, max_chars=8000)
+
     if language == "id":
         prev_block = ""
         if prev_titles:
@@ -1160,7 +1290,15 @@ async def generate_multi_agent(
     draft_idea: Optional[str] = None,
     paradigm: Optional[str] = None,
     analysis_method: Optional[str] = None,
+    session_id: Optional[str] = None,
+    resume_checkpoint: Optional[dict] = None,
 ) -> tuple[str, dict]:
+
+    from checkpoint import save_checkpoint, mark_checkpoint_completed
+
+    if not session_id:
+        import uuid
+        session_id = f"journal-{uuid.uuid4().hex[:8]}"
 
     async def log(agent: str, msg: str, detail: str = ""):
         line = f"[{agent}] {msg}"
@@ -1169,6 +1307,7 @@ async def generate_multi_agent(
             await log_queue.put({
                 "type": "log", "agent": agent,
                 "message": msg, "detail": detail,
+                "session_id": session_id,
             })
 
     tracker = TokenTracker()
@@ -1186,40 +1325,54 @@ async def generate_multi_agent(
 
     paper_list = _get_paper_list(papers)
 
-    # ---- Step 0: Methodology Analyst (runs once) ----
-    if (paradigm and paradigm.lower() not in ("auto", "none")) and (analysis_method and analysis_method.lower() not in ("auto", "none")):
-        await log("Methodology Analyst", f"Menggunakan paradigma '{paradigm}' dan metode '{analysis_method}' yang Anda pilih.")
-        if lang == "id":
-            methodology_context = (
-                f"Pendekatan: Kualitatif\n"
-                f"Paradigma: {paradigm}\n"
-                f"Metode Analisis: {analysis_method}"
-            )
-        else:
-            methodology_context = (
-                f"Approach: Qualitative\n"
-                f"Paradigm: {paradigm}\n"
-                f"Analysis Method: {analysis_method}"
-            )
+    if resume_checkpoint:
+        await log("Checkpoint", f"Memulihkan sesi checkpoint '{session_id}'...")
+        methodology_context = resume_checkpoint.get("methodology_context", "")
+        all_content = resume_checkpoint.get("all_content", "")
+        prev_titles = resume_checkpoint.get("prev_titles", "")
+        start_index = resume_checkpoint.get("completed_count", 0)
+        rolling_memory = RollingMemory(max_recent=2, max_chars=4500, lang=lang)
+        rolling_memory.entries = resume_checkpoint.get("rolling_memory_entries", [])
+        await log("Checkpoint", f"Melanjutkan generasi mulai Bagian {start_index + 1} dari total {len(section_order)} bagian.")
     else:
-        await log("Methodology Analyst", "Menentukan paradigma dan metode analisis...")
-        methodology_sys = SYSTEM_PROMPTS["methodology_analyst"][lang]
-        
-        task_prefix = ""
-        if paradigm and paradigm.lower() == "none":
-            task_prefix += "PENTING: Jangan gunakan atau tentukan paradigma penelitian khusus (lewati).\n" if lang == "id" else "IMPORTANT: Do not use or specify any specific research paradigm (skip).\n"
-        elif paradigm and paradigm.lower() != "auto":
-            task_prefix += f"PENTING: Anda HARUS menggunakan Paradigma: {paradigm}.\n" if lang == "id" else f"IMPORTANT: You MUST use Paradigm: {paradigm}.\n"
+        # ---- Step 0: Methodology Analyst (runs once) ----
+        if (paradigm and paradigm.lower() not in ("auto", "none")) and (analysis_method and analysis_method.lower() not in ("auto", "none")):
+            await log("Methodology Analyst", f"Menggunakan paradigma '{paradigm}' dan metode '{analysis_method}' yang Anda pilih.")
+            if lang == "id":
+                methodology_context = (
+                    f"Pendekatan: Kualitatif\n"
+                    f"Paradigma: {paradigm}\n"
+                    f"Metode Analisis: {analysis_method}"
+                )
+            else:
+                methodology_context = (
+                    f"Approach: Qualitative\n"
+                    f"Paradigm: {paradigm}\n"
+                    f"Analysis Method: {analysis_method}"
+                )
+        else:
+            await log("Methodology Analyst", "Menentukan paradigma dan metode analisis...")
+            methodology_sys = SYSTEM_PROMPTS["methodology_analyst"][lang]
             
-        if analysis_method and analysis_method.lower() == "none":
-            task_prefix += "PENTING: Jangan gunakan atau tentukan metode analisis kualitatif/kuantitatif khusus (lewati).\n" if lang == "id" else "IMPORTANT: Do not use or specify any specific qualitative/quantitative analysis method (skip).\n"
-        elif analysis_method and analysis_method.lower() != "auto":
-            task_prefix += f"PENTING: Anda HARUS menggunakan Metode Analisis: {analysis_method}.\n" if lang == "id" else f"IMPORTANT: You MUST use Analysis Method: {analysis_method}.\n"
+            task_prefix = ""
+            if paradigm and paradigm.lower() == "none":
+                task_prefix += "PENTING: Jangan gunakan atau tentukan paradigma penelitian khusus (lewati).\n" if lang == "id" else "IMPORTANT: Do not use or specify any specific research paradigm (skip).\n"
+            elif paradigm and paradigm.lower() != "auto":
+                task_prefix += f"PENTING: Anda HARUS menggunakan Paradigma: {paradigm}.\n" if lang == "id" else f"IMPORTANT: You MUST use Paradigm: {paradigm}.\n"
+                
+            if analysis_method and analysis_method.lower() == "none":
+                task_prefix += "PENTING: Jangan gunakan atau tentukan metode analisis kualitatif/kuantitatif khusus (lewati).\n" if lang == "id" else "IMPORTANT: Do not use or specify any specific qualitative/quantitative analysis method (skip).\n"
+            elif analysis_method and analysis_method.lower() != "auto":
+                task_prefix += f"PENTING: Anda HARUS menggunakan Metode Analisis: {analysis_method}.\n" if lang == "id" else f"IMPORTANT: You MUST use Analysis Method: {analysis_method}.\n"
 
-        methodology_task = task_prefix + _methodology_prompt(lang, theme, paper_list, template)
-        methodology_context = await tracker.run(provider, methodology_sys, methodology_task)
-    
-    await log("Methodology Analyst", f"Selesai (Metodologi: {methodology_context.replace('\n', ', ')})")
+            methodology_task = task_prefix + _methodology_prompt(lang, theme, paper_list, template)
+            methodology_context = await tracker.run(provider, methodology_sys, methodology_task)
+        
+        await log("Methodology Analyst", f"Selesai (Metodologi: {methodology_context.replace('\n', ', ')})")
+        all_content = ""
+        prev_titles = ""
+        rolling_memory = RollingMemory(max_recent=2, max_chars=4500, lang=lang)
+        start_index = 0
 
     # Build template + previous-works context (exclude methodology from global context)
     template_ctx = ""
@@ -1233,15 +1386,13 @@ async def generate_multi_agent(
         else:
             template_ctx += f"AUTHOR'S DRAFT IDEA (Must be expanded and serve as the core foundation of the text):\n{draft_idea}\n\n"
 
-    all_content = ""
-    prev_titles = ""
-    global_memory = []
-
-    for section_key in section_order:
+    for i in range(start_index, len(section_order)):
+        section_key = section_order[i]
         heading = headings[section_key]
-        await log("Pipeline", f"Memproses bagian: {section_key} ({heading})")
+        section_num = i + 1
+        await log("Pipeline", f"Memproses bagian {section_num}/{len(section_order)}: {section_key} ({heading})")
 
-        previous_summary = "\n".join(global_memory)
+        previous_summary = rolling_memory.get_summary()
 
         # Append methodology only to the Methods section
         section_template_ctx = template_ctx
@@ -1267,70 +1418,67 @@ async def generate_multi_agent(
         await log("Lead Researcher", "Membuat rencana penelitian...")
         researcher_sys = section_template_ctx + SYSTEM_PROMPTS["lead_researcher"][lang]
         task = _researcher_prompt(lang, section_key, theme, heading, rag, prev_titles, previous_summary=previous_summary)
-        research_plan = await tracker.run(provider, researcher_sys, task)
+        research_plan = await tracker.run(provider, researcher_sys, task, lang=lang)
         await log("Lead Researcher", f"Rencana selesai ({len(research_plan)} chars)")
 
         # 2. Source Reviewer
         await log("Source Reviewer", "Mensintesis temuan dari sumber...")
         reviewer_sys = section_template_ctx + SYSTEM_PROMPTS["source_reviewer"][lang]
         task = _reviewer_prompt(lang, section_key, theme, heading, research_plan, rag)
-        findings = await tracker.run(provider, reviewer_sys, task)
+        findings = await tracker.run(provider, reviewer_sys, task, lang=lang)
         await log("Source Reviewer", f"Sintesis selesai ({len(findings)} chars)")
 
         # 3. Lead Writer (first draft)
         await log("Lead Writer", "Menulis draf pertama...")
         writer_sys = section_template_ctx + SYSTEM_PROMPTS["lead_writer"][lang]
         task = _writer_prompt(lang, section_key, theme, heading, research_plan, findings, word_target, prev_titles, paper_list, previous_summary=previous_summary, has_data=has_data, user_data=user_data)
-        section_content = await tracker.run(provider, writer_sys, task)
+        section_content = await tracker.run(provider, writer_sys, task, lang=lang)
         await log("Lead Writer", f"Draf selesai ({len(section_content)} chars)")
 
         # 3b. Lead Storyteller (enrich descriptiveness)
         await log("Lead Storyteller", "Memperkaya dengan elemen naratif...")
         story_sys = section_template_ctx + SYSTEM_PROMPTS["lead_story"][lang]
         story_task = _lead_story_prompt(lang, theme, heading, section_content)
-        section_content_storied = await tracker.run(provider, story_sys, story_task)
+        section_content_storied = await tracker.run(provider, story_sys, story_task, lang=lang)
         await log("Lead Storyteller", f"Pengayaan selesai ({len(section_content_storied)} chars)")
 
         # 4. Peer Reviewer
         await log("Peer Reviewer", "Mengevaluasi naskah...")
         peer_sys = section_template_ctx + SYSTEM_PROMPTS["peer_reviewer"][lang]
         task = _peer_review_prompt(lang, theme, heading, research_plan, findings, section_content_storied, previous_summary=previous_summary)
-        peer_review = await tracker.run(provider, peer_sys, task)
+        peer_review = await tracker.run(provider, peer_sys, task, lang=lang)
         await log("Peer Reviewer", f"Review selesai ({len(peer_review)} chars)")
 
         # 5. Lead Researcher (revision)
         await log("Lead Researcher", "Merevisi rencana berdasarkan review...")
         research_revision_task = _researcher_revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, prev_titles, previous_summary=previous_summary)
-        research_plan = await tracker.run(provider, researcher_sys, research_revision_task)
+        research_plan = await tracker.run(provider, researcher_sys, research_revision_task, lang=lang)
         await log("Lead Researcher", f"Rencana revisi selesai ({len(research_plan)} chars)")
 
         # 6. Lead Writer (revision)
         await log("Lead Writer", "Menulis draf revisi...")
         task = _revision_prompt(lang, theme, heading, research_plan, findings, section_content_storied, peer_review, paper_list, prev_titles, previous_summary=previous_summary)
-        section_content = await tracker.run(provider, writer_sys, task)
+        section_content = await tracker.run(provider, writer_sys, task, lang=lang)
         await log("Lead Writer", f"Draf revisi selesai ({len(section_content)} chars)")
 
         # 6b. Lead Storyteller (revision enrich)
         await log("Lead Storyteller", "Memperkaya revisi...")
         story_task = _lead_story_prompt(lang, theme, heading, section_content)
-        section_content = await tracker.run(provider, story_sys, story_task)
+        section_content = await tracker.run(provider, story_sys, story_task, lang=lang)
         await log("Lead Storyteller", "Pengayaan revisi selesai")
 
         # 7. Lead Layouter (insert diagrams, charts, tables)
         await log("Lead Layouter", "Menambahkan elemen visual...")
-        # Only use the role system prompt — no template_ctx to avoid confusing the model
-        # into rewriting the full paper structure instead of just adding visuals
         layouter_sys = SYSTEM_PROMPTS["lead_layouter"][lang]
         layout_task = _lead_layout_prompt(lang, section_key, theme, heading, section_content, has_data, user_data)
-        section_content = await tracker.run(provider, layouter_sys, layout_task)
+        section_content = await tracker.run(provider, layouter_sys, layout_task, lang=lang)
         await log("Lead Layouter", f"Visual selesai ({len(section_content)} chars)")
 
         # 8. Humanizer
         await log("Humanizer", "Menghumanisasi naskah...")
-        # Clean system prompt — no template_ctx to avoid prompt leakage
         humanizer_sys = SYSTEM_PROMPTS["humanizer"][lang]
         task = _humanizer_prompt(lang, theme, heading, section_content)
-        section_content = await tracker.run(provider, humanizer_sys, task)
+        section_content = await tracker.run(provider, humanizer_sys, task, lang=lang)
         await log("Humanizer", f"Selesai ({len(section_content)} chars)")
 
         # 8b. Memory Updater (State Tracker)
@@ -1340,12 +1488,32 @@ async def generate_multi_agent(
         else:
             summary_sys = "You are a Memory Updater expert in creating concise, dense academic summaries to avoid repetition."
         summary_task = _summarize_section_prompt(lang, heading, section_content)
-        section_summary = await tracker.run(provider, summary_sys, summary_task)
-        global_memory.append(f"### {heading}\n{section_summary}")
-        await log("Memory Updater", f"Working Memory diperbarui untuk {heading}")
+        section_summary = await tracker.run(provider, summary_sys, summary_task, lang=lang)
+        rolling_memory.add(heading, section_summary)
+        await log("Memory Updater", f"Working Memory diperbarui untuk {heading} (Total {len(rolling_memory)} bagian tersimpan)")
 
         await log("Pipeline", f"Bagian {section_key} selesai")
-        all_content += "\n\n" + section_content
+        all_content += ("\n\n" if all_content else "") + section_content
         prev_titles += f"{heading}\n"
+
+        # Simpan Checkpoint snapshot
+        save_checkpoint(session_id, {
+            "theme": theme,
+            "mode": "journal",
+            "language": language,
+            "provider": provider.name,
+            "current_step": section_num,
+            "total_steps": len(section_order),
+            "completed_count": section_num,
+            "section_order": section_order,
+            "all_content": all_content,
+            "prev_titles": prev_titles,
+            "methodology_context": methodology_context,
+            "rolling_memory_entries": rolling_memory.entries,
+            "status": "in_progress" if section_num < len(section_order) else "completed"
+        })
+
+    # Hapus file checkpoint setelah selesai 100%
+    mark_checkpoint_completed(session_id)
 
     return all_content, tracker.usage()

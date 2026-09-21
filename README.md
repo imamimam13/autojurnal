@@ -74,79 +74,60 @@ Each section (Judul/Abstrak, Pendahuluan, Tinjauan Pustaka, Metode, Temuan, Penu
 - **Ollama** (recommended) or API keys for cloud providers
 - **Docker** (optional, for running Qdrant server — not needed for in-memory mode)
 
-## Installation
+## Quick Start & Installation
+
+### 🍎 macOS / Linux (1-Click Installer)
+
+1. **Jalankan Installer:**
+   ```bash
+   ./install.sh
+   ```
+   *Script ini otomatis menyiapkan environment, menginstal dependensi, dan meng-compile `AutoJurnal.app`.*
+
+2. **Jalankan Aplikasi:**
+   - **Double-click** file **`AutoJurnal.app`** di folder project (atau pindahkan ke `/Applications` / Desktop).
+   - *Aplikasi langsung terbuka dalam Dedicated App Window (tanpa address bar browser).*
+   - **Atau via terminal:** `./run.sh`
+
+3. **Hentikan Aplikasi:**
+   - Klik ganda `AutoJurnal.app` lalu pilih **Hentikan Server**, atau jalankan `./stop.sh`.
+
+---
+
+### 🪟 Windows (1-Click Installer)
+
+1. **Jalankan Installer:**
+   - Double-click **`install.bat`**
+   - *Script akan otomatis mengecek Python, membuat virtual environment, menginstal dependensi, dan membuat shortcut **AutoJurnal** di Desktop Windows Anda.*
+
+2. **Jalankan Aplikasi:**
+   - **Double-click shortcut `AutoJurnal` di Desktop Anda** (atau double-click `run.bat`).
+   - *Aplikasi langsung terbuka dalam Native App Window (Microsoft Edge / Google Chrome App Mode).*
+
+3. **Hentikan Aplikasi:**
+   - Double-click **`stop.bat`**
+
+---
+
+## Manual Installation via Terminal (Optional)
 
 ```bash
 git clone https://github.com/imamimam13/autojurnal.git
 cd autojurnal
 
+# macOS / Linux:
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies (matplotlib needs font cache set)
 MPLCONFIGDIR=/tmp/matplotlib pip install -r backend/requirements.txt
+./run.sh
 
-# Install optional provider dependencies (OpenAI, Anthropic, Gemini, OpenAI Compatible)
-pip install -r backend/requirements-optional.txt
-
-# Install matplotlib separately if needed
-MPLCONFIGDIR=/tmp/matplotlib pip install matplotlib matplotlib-venn
+# Windows:
+python -m venv venv
+venv\Scripts\activate
+pip install -r backend\requirements.txt
+run.bat
 ```
 
-> **Note:** `fastembed` requires `onnxruntime`. If installation fails, the app falls back to TF-IDF automatically. Qdrant in-memory mode uses `qdrant-client<1.13` for Python 3.14 compatibility.
-
-## Configuration
-
-Copy `.env.example` to `.env` and fill in credentials:
-
-```env
-# OpenAlex (optional, for higher rate limits)
-OPENALEX_API_KEY=your_key_here
-
-# Ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=gemma3:12b
-
-# OpenAI
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o-mini
-
-# Anthropic
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-3-haiku-20240307
-
-# Google Gemini
-GEMINI_API_KEY=AIza...
-GEMINI_MODEL=gemini-2.0-flash
-
-# OpenAI Compatible (e.g. llama.cpp, LM Studio, vLLM)
-OPENAI_COMPATIBLE_API_KEY=
-OPENAI_COMPATIBLE_MODEL=llama3
-OPENAI_COMPATIBLE_BASE_URL=http://localhost:8080/v1
-```
-
-## Usage
-
-```bash
-# Start Ollama (Docker)
-docker start ollama  # or: docker run -d --name ollama -p 11434:11434 ollama/ollama
-
-# Pull a model
-docker exec ollama ollama pull gemma3:12b
-
-# Start the server (Development mode with auto-reload)
-cd /Users/imamimam/Documents/GitHub/autojurnal
-MPLCONFIGDIR=/tmp/matplotlib venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Start the server in the background (nohup mode for persistence)
-MPLCONFIGDIR=/tmp/matplotlib nohup venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
-
-# View background logs
-tail -f server.log
-
-# Stop the background server
-pkill -f "uvicorn backend.main:app"
-```
 
 Open `http://localhost:8000` in your browser.
 

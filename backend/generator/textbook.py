@@ -5,6 +5,7 @@ from search.openalex import Paper
 from providers.base import LLMProvider
 from rag.store import store
 from .agents import TokenTracker, _methodology_prompt, _lead_story_prompt, _summarize_section_prompt
+from .memory import RollingMemory, truncate_context_budget
 
 
 DEFAULT_SUBSECTIONS = {
@@ -160,6 +161,7 @@ Output ONLY the chapter list, no extra commentary."""
 
 
 def _chapter_researcher_prompt(language: str, theme: str, chapter_num: int, chapter_title: str, prev_titles: str, previous_summary: str = "") -> str:
+    previous_summary = truncate_context_budget(previous_summary, max_chars=3500)
     if language == "id":
         prev = ""
         if prev_titles:
@@ -211,6 +213,8 @@ Output ONLY the chapter plan, no extra commentary."""
 
 
 def _chapter_reviewer_prompt(language: str, theme: str, chapter_num: int, chapter_title: str, research_plan: str, rag: str) -> str:
+    research_plan = truncate_context_budget(research_plan, max_chars=3000)
+    rag = truncate_context_budget(rag, max_chars=3500)
     if language == "id":
         return f"""Tema: "{theme}"
 Bab {chapter_num}: {chapter_title}
@@ -253,6 +257,11 @@ Output ONLY the extracted material, organized by topic."""
 
 
 def _chapter_writer_prompt(language: str, theme: str, chapter_num: int, chapter_title: str, research_plan: str, findings: str, prev_titles: str, paper_list: str, all_chapter_titles: str, previous_summary: str = "", subsections: Optional[list[str]] = None, has_data: bool = False, user_data: Optional[str] = None) -> str:
+    research_plan = truncate_context_budget(research_plan, max_chars=3000)
+    findings = truncate_context_budget(findings, max_chars=3500)
+    previous_summary = truncate_context_budget(previous_summary, max_chars=3500)
+    user_data = truncate_context_budget(user_data, max_chars=3000) if user_data else None
+
     from diagrams.prompts import diagram_instruction
     diag = diagram_instruction(has_data, language, user_data, content=findings + "\n" + prev_titles)
     no_ref = (
@@ -456,7 +465,15 @@ async def generate_textbook(
     log_queue: Optional[asyncio.Queue] = None,
     previous_works_ctx: str = "",
     draft_idea: Optional[str] = None,
+    session_id: Optional[str] = None,
+    resume_checkpoint: Optional[dict] = None,
 ) -> tuple[str, dict]:
+
+    from checkpoint import save_checkpoint, mark_checkpoint_completed
+
+    if not session_id:
+        import uuid
+        session_id = f"textbook-{uuid.uuid4().hex[:8]}"
 
     async def log(agent: str, msg: str, detail: str = ""):
         line = f"[{agent}] {msg}"
@@ -465,6 +482,7 @@ async def generate_textbook(
             await log_queue.put({
                 "type": "log", "agent": agent,
                 "message": msg, "detail": detail,
+                "session_id": session_id,
             })
 
     tracker = TokenTracker()
@@ -478,12 +496,24 @@ async def generate_textbook(
         for i, p in enumerate(papers)
     )
 
-    # ---- Step 0: Methodology Analyst (runs once) ----
-    await log("Methodology Analyst", "Menentukan metodologi penelitian...")
-    methodology_sys = TEXTBOOK_PROMPTS["methodology_analyst"][lang]
-    methodology_task = _methodology_prompt(lang, theme, paper_list, template)
-    methodology_context = await tracker.run(provider, methodology_sys, methodology_task)
-    await log("Methodology Analyst", f"Selesai ({len(methodology_context)} chars)")
+    # Memeriksa data resume jika ada
+    if resume_checkpoint:
+        await log("Checkpoint", f"Memulihkan sesi checkpoint '{session_id}'...")
+        methodology_context = resume_checkpoint.get("methodology_context", "")
+        chapters = resume_checkpoint.get("chapters", [])
+        all_content = resume_checkpoint.get("all_content", "")
+        prev_titles = resume_checkpoint.get("prev_titles", "")
+        start_index = resume_checkpoint.get("completed_count", 0)
+        rolling_memory = RollingMemory(max_recent=3, max_chars=4500, lang=lang)
+        rolling_memory.entries = resume_checkpoint.get("rolling_memory_entries", [])
+        await log("Checkpoint", f"Melanjutkan generasi mulai Bab {start_index + 1} dari total {len(chapters)} bab.")
+    else:
+        # ---- Step 0: Methodology Analyst (runs once) ----
+        await log("Methodology Analyst", "Menentukan metodologi penelitian...")
+        methodology_sys = TEXTBOOK_PROMPTS["methodology_analyst"][lang]
+        methodology_task = _methodology_prompt(lang, theme, paper_list, template)
+        methodology_context = await tracker.run(provider, methodology_sys, methodology_task)
+        await log("Methodology Analyst", f"Selesai ({len(methodology_context)} chars)")
 
     # Build template + methodology + previous-works context
     template_ctx = ""
@@ -504,24 +534,27 @@ async def generate_textbook(
         else:
             template_ctx += f"AUTHOR'S DRAFT IDEA (Must be expanded and serve as the core foundation of the text):\n{draft_idea}\n\n"
 
-    # ---- Step 1: Curriculum Designer ----
-    await log("Curriculum Designer", f"Mendesain kurikulum untuk {num_chapters} bab...")
-    curriculum_sys = (template_ctx or "") + (CURRICULUM_SYSTEM_ID if language == "id" else CURRICULUM_SYSTEM_EN)
-    curriculum_task = _curriculum_prompt(lang, theme, num_chapters)
-    chapter_text = await tracker.run(provider, curriculum_sys, curriculum_task)
-    chapters = _parse_chapters(chapter_text, num_chapters)
-    await log("Curriculum Designer", f"{len(chapters)} bab dibuat")
+    if not resume_checkpoint:
+        # ---- Step 1: Curriculum Designer ----
+        await log("Curriculum Designer", f"Mendesain kurikulum untuk {num_chapters} bab...")
+        curriculum_sys = (template_ctx or "") + (CURRICULUM_SYSTEM_ID if language == "id" else CURRICULUM_SYSTEM_EN)
+        curriculum_task = _curriculum_prompt(lang, theme, num_chapters)
+        chapter_text = await tracker.run(provider, curriculum_sys, curriculum_task)
+        chapters = _parse_chapters(chapter_text, num_chapters)
+        await log("Curriculum Designer", f"{len(chapters)} bab dibuat")
+        all_content = ""
+        prev_titles = ""
+        rolling_memory = RollingMemory(max_recent=3, max_chars=4500, lang=lang)
+        start_index = 0
 
     all_chapter_titles = "\n".join(f"Chapter {i+1}: {t}" for i, t in enumerate(chapters))
-    all_content = ""
-    prev_titles = ""
-    global_memory = []
 
-    for i, title in enumerate(chapters):
+    for i in range(start_index, len(chapters)):
+        title = chapters[i]
         chapter_num = i + 1
-        await log("Pipeline", f"Bab {chapter_num}/{num_chapters}: {title}")
+        await log("Pipeline", f"Bab {chapter_num}/{len(chapters)}: {title}")
 
-        previous_summary = "\n".join(global_memory)
+        previous_summary = rolling_memory.get_summary()
 
         # RAG context for this chapter
         rag = ""
@@ -534,35 +567,35 @@ async def generate_textbook(
         await log("Lead Researcher", "Membuat rencana bab...")
         researcher_sys = template_ctx + TEXTBOOK_PROMPTS["lead_researcher"][lang]
         task = _chapter_researcher_prompt(lang, theme, chapter_num, title, prev_titles, previous_summary=previous_summary)
-        plan = await tracker.run(provider, researcher_sys, task)
+        plan = await tracker.run(provider, researcher_sys, task, lang=lang)
         await log("Lead Researcher", f"Rencana selesai ({len(plan)} chars)")
 
         # 3. Source Reviewer
         await log("Source Reviewer", "Mengekstrak materi dari sumber...")
         reviewer_sys = template_ctx + TEXTBOOK_PROMPTS["source_reviewer"][lang]
         task = _chapter_reviewer_prompt(lang, theme, chapter_num, title, plan, rag)
-        findings = await tracker.run(provider, reviewer_sys, task)
+        findings = await tracker.run(provider, reviewer_sys, task, lang=lang)
         await log("Source Reviewer", f"Ekstraksi selesai ({len(findings)} chars)")
 
         # 4. Lead Writer
         await log("Lead Writer", "Menulis bab...")
         writer_sys = template_ctx + TEXTBOOK_PROMPTS["lead_writer"][lang]
         task = _chapter_writer_prompt(lang, theme, chapter_num, title, plan, findings, prev_titles, paper_list, all_chapter_titles, previous_summary=previous_summary, subsections=subsections, has_data=has_data, user_data=user_data)
-        chapter_content = await tracker.run(provider, writer_sys, task)
+        chapter_content = await tracker.run(provider, writer_sys, task, lang=lang)
         await log("Lead Writer", f"Bab selesai ({len(chapter_content)} chars)")
 
         # 4b. Lead Storyteller (enrich descriptiveness)
         await log("Lead Storyteller", "Memperkaya dengan ilustrasi dan narasi...")
         story_sys = template_ctx + TEXTBOOK_PROMPTS["lead_story"][lang]
         story_task = _chapter_lead_story_prompt(lang, chapter_num, title, chapter_content, methodology_context)
-        chapter_content = await tracker.run(provider, story_sys, story_task)
+        chapter_content = await tracker.run(provider, story_sys, story_task, lang=lang)
         await log("Lead Storyteller", "Pengayaan selesai")
 
         # 5. Humanizer
         await log("Humanizer", "Menghumanisasi bab...")
         humanizer_sys = TEXTBOOK_PROMPTS["humanizer"][lang]
         task = _chapter_humanizer_prompt(lang, chapter_num, title, chapter_content)
-        chapter_content = await tracker.run(provider, humanizer_sys, task)
+        chapter_content = await tracker.run(provider, humanizer_sys, task, lang=lang)
         await log("Humanizer", f"Selesai ({len(chapter_content)} chars)")
 
         # 5b. Memory Updater (State Tracker)
@@ -571,22 +604,83 @@ async def generate_textbook(
             summary_sys = "Anda adalah Memory Updater yang ahli dalam membuat ringkasan akademis singkat dan padat untuk menghindari repetisi."
         else:
             summary_sys = "You are a Memory Updater expert in creating concise, dense academic summaries to avoid repetition."
-        summary_task = _summarize_section_prompt(lang, f"Bab {chapter_num}: {title}" if language == "id" else f"Chapter {chapter_num}: {title}", chapter_content)
-        chapter_summary = await tracker.run(provider, summary_sys, summary_task)
-        global_memory.append(f"### Bab {chapter_num}: {title}\n{chapter_summary}" if language == "id" else f"### Chapter {chapter_num}: {title}\n{chapter_summary}")
-        await log("Memory Updater", f"Working Memory diperbarui untuk bab {chapter_num}")
+        chapter_label = f"Bab {chapter_num}: {title}" if language == "id" else f"Chapter {chapter_num}: {title}"
+        summary_task = _summarize_section_prompt(lang, chapter_label, chapter_content)
+        chapter_summary = await tracker.run(provider, summary_sys, summary_task, lang=lang)
+        rolling_memory.add(chapter_label, chapter_summary)
+        await log("Memory Updater", f"Working Memory diperbarui untuk bab {chapter_num} (Total {len(rolling_memory)} bab tersimpan)")
 
         await log("Pipeline", f"Bab {chapter_num} selesai")
-        all_content += "\n\n" + chapter_content
+        all_content += ("\n\n" if all_content else "") + chapter_content
         prev_titles += f"Bab {chapter_num}: {title}\n" if language == "id" else f"Chapter {chapter_num}: {title}\n"
+
+        # Simpan Checkpoint snapshot setelah setiap bab selesai
+        save_checkpoint(session_id, {
+            "theme": theme,
+            "mode": "textbook",
+            "language": language,
+            "provider": provider.name,
+            "current_step": chapter_num,
+            "total_steps": len(chapters),
+            "completed_count": chapter_num,
+            "chapters": chapters,
+            "all_content": all_content,
+            "prev_titles": prev_titles,
+            "methodology_context": methodology_context,
+            "rolling_memory_entries": rolling_memory.entries,
+            "status": "in_progress" if chapter_num < len(chapters) else "completed"
+        })
+
+    # Hapus file checkpoint setelah selesai 100%
+    mark_checkpoint_completed(session_id)
 
     # Add Daftar Pustaka at the end
     id_heading = "## Daftar Pustaka"
     en_heading = "## References"
     heading = id_heading if language == "id" else en_heading
-    all_content += f"\n\n{heading}\n\n" + "\n\n".join(
-        f"[{i+1}] {p.authors[0] if p.authors else 'Unknown'} ({p.year}). {p.title}."
-        for i, p in enumerate(papers)
-    )
+
+    def _format_ref(p) -> str:
+        if not p.authors:
+            author_str = "Unknown"
+        else:
+            def _apa(name):
+                name = name.strip()
+                if not name:
+                    return "Unknown"
+                if "," in name:
+                    return name
+                parts = name.split()
+                if len(parts) == 1:
+                    return parts[0]
+                suffixes = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv"}
+                if len(parts) > 2 and parts[-1].lower() in suffixes:
+                    last = f"{parts[-2]} {parts[-1]}"
+                    firsts = parts[:-2]
+                else:
+                    last = parts[-1]
+                    firsts = parts[:-1]
+                initials = " ".join(f"{f[0].upper()}." for f in firsts if f)
+                return f"{last}, {initials}" if initials else last
+
+            if len(p.authors) == 1:
+                author_str = _apa(p.authors[0])
+            elif len(p.authors) == 2:
+                author_str = f"{_apa(p.authors[0])} & {_apa(p.authors[1])}"
+            else:
+                author_str = f"{_apa(p.authors[0])} et al."
+
+        year = p.year or "n.d."
+        url = f"https://doi.org/{p.doi}" if p.doi else (p.url or p.openalex_url or "")
+        title = (p.title or "Untitled").rstrip(".")
+        parts = [f"{author_str} ({year}). {title}."]
+        if p.source:
+            parts.append(f" {p.source}.")
+        if url:
+            parts.append(f" URL: {url}")
+        return "".join(parts)
+
+    sorted_papers = sorted(papers, key=lambda p: _format_ref(p).strip().lower())
+    refs = "\n\n".join(_format_ref(p) for p in sorted_papers)
+    all_content += f"\n\n{heading}\n\n{refs}"
 
     return all_content, tracker.usage()

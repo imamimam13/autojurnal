@@ -26,7 +26,11 @@ def _tokenize(text: str) -> list[str]:
 class ChunkStore:
     def __init__(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        self.client = QdrantClient(path=str(DATA_DIR / "qdrant_rag"))
+        try:
+            self.client = QdrantClient(path=str(DATA_DIR / "qdrant_rag"))
+        except Exception as e:
+            print(f"[RAG] Local Qdrant locked or unavailable ({e}), using in-memory store")
+            self.client = QdrantClient(location=":memory:")
         self.chunks: list[dict[str, Any]] = []
         self._built = False
         self.paper_hash: Optional[str] = None
@@ -329,4 +333,25 @@ class ChunkStore:
         return "\n\n---\n\n".join(parts)
 
 
-store = ChunkStore()
+class _LazyStore:
+    """Creates the ChunkStore lazily on first use.
+
+    QdrantClient local mode acquires an exclusive file lock on the storage
+    directory. uvicorn --reload spawns a second Python process (spawn) that
+    re-imports this module, so creating the store eagerly at import time makes
+    the reloader parent and the worker process both try to lock the same folder
+    and the second one fails with "storage folder already accessed by another
+    instance". Deferring creation until the first method call means only the
+    process that actually serves requests opens the store.
+    """
+
+    def __init__(self) -> None:
+        self.__dict__["_instance"] = None
+
+    def __getattr__(self, name: str):
+        if self.__dict__.get("_instance") is None:
+            self.__dict__["_instance"] = ChunkStore()
+        return getattr(self.__dict__["_instance"], name)
+
+
+store = _LazyStore()

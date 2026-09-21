@@ -5,10 +5,18 @@ import base64
 import re
 from typing import Optional
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
+
+_plt = None
+
+def _get_plt():
+    global _plt
+    if _plt is None:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        _plt = plt
+    return _plt
 
 DIAGRAM_RE = re.compile(
     r"---DIAGRAM---\s*(.*?)---END DIAGRAM---",
@@ -115,7 +123,7 @@ def _mpl_render(fig) -> Optional[bytes]:
         print(f"[Diagram] matplotlib render failed: {e}")
         return None
     finally:
-        plt.close(fig)
+        _get_plt().close(fig)
 
 
 def _img_tag(svg_bytes: bytes, alt: str = "Diagram") -> str:
@@ -247,6 +255,7 @@ def _render_bar(data: dict) -> Optional[str]:
     y_label = data.get("y_label", "")
     if not labels or not values:
         return None
+    plt = _get_plt()
     fig, ax = plt.subplots(figsize=(max(4, len(labels) * 0.5), 3))
     colors = plt.cm.Blues(np.linspace(0.4, 0.8, len(labels)))
     ax.bar(labels, values, color=colors, edgecolor="#333", linewidth=0.5)
@@ -273,6 +282,7 @@ def _render_line(data: dict) -> Optional[str]:
     y_label = data.get("y_label", "")
     if not labels or not datasets:
         return None
+    plt = _get_plt()
     fig, ax = plt.subplots(figsize=(max(4, len(labels) * 0.4), 3))
     colors = ["#2563EB", "#DC2626", "#16A34A", "#D97706", "#7C3AED", "#0891B2"]
     for i, ds in enumerate(datasets):
@@ -307,6 +317,7 @@ def _render_pie(data: dict) -> Optional[str]:
     values = data.get("values", [])
     if not labels or not values:
         return None
+    plt = _get_plt()
     fig, ax = plt.subplots(figsize=(4, 3))
     colors = plt.cm.Set2(range(len(labels)))
     wedges, texts, autotexts = ax.pie(
@@ -332,6 +343,7 @@ def _render_venn(data: dict) -> Optional[str]:
     num_sets = len(sets)
     if num_sets < 2 or num_sets > 3:
         return None
+    plt = _get_plt()
     fig, ax = plt.subplots(figsize=(4, 3))
     if num_sets == 2:
         v = venn2(
@@ -369,6 +381,7 @@ def _render_gantt(data: dict) -> Optional[str]:
     tasks = data.get("tasks", [])
     if not tasks:
         return None
+    plt = _get_plt()
     names = [t.get("name", f"Task {i+1}") for i, t in enumerate(tasks)]
     starts = [t.get("start", 0) for t in tasks]
     ends = [t.get("end", 1) for t in tasks]

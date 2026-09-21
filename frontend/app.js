@@ -9,12 +9,20 @@ let currentJournal = "";
 let templates = [];
 let parsedTemplate = null;
 
+let aiCatalog = [];
+let aiSettings = {};
+let currentAICategory = 'all';
+let activeCheckpointData = null;
+
 document.addEventListener("DOMContentLoaded", async () => {
+    await loadAISettings();
     await loadProviders();
+    await checkActiveCheckpoint();
     restoreSettings();
     updatePlaceholders(document.getElementById("provider").value);
     restoreCollection();
     restoreIdeaCollection();
+    updateDraftsBadge();
     await loadTemplateList();
 
     document.getElementById("mode").addEventListener("change", () => {
@@ -718,6 +726,15 @@ function displayResult(data, mode) {
         }
     }
 
+    // Auto-save generated draft
+    saveDraft({
+        title: document.getElementById("paper-title")?.value.trim() || document.getElementById("theme")?.value.trim(),
+        content: currentJournal,
+        mode: mode,
+        language: document.getElementById("language")?.value,
+        inLibrary: document.getElementById("use-library")?.checked || false,
+    }, false);
+
     document.getElementById("journal-content").scrollIntoView({
         behavior: "smooth",
     });
@@ -730,12 +747,14 @@ function showToast(msg, type = "success") {
     bootstrap.Toast.getOrCreateInstance(toast).show();
 }
 
+let mermaidRenderCounter = 0;
+
 function renderMarkdown(text) {
     const html = marked.parse(text);
-    // Wrap mermaid code blocks for live rendering
+    // Wrap mermaid code blocks for live rendering and preserve code in data attribute
     const withMermaid = html.replace(
         /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
-        '<div class="mermaid">$1</div>'
+        (match, code) => `<div class="mermaid" data-code="${encodeURIComponent(code)}">${code}</div>`
     );
     // Render mermaid after DOM update
     setTimeout(() => {
@@ -755,108 +774,216 @@ function renderMarkdown(text) {
     return withMermaid;
 }
 
-function convertMermaidToPng() {
-    const svgs = document.querySelectorAll(".mermaid svg");
-    svgs.forEach((svg) => {
-        if (svg.dataset.pngConverted) return;
-        
-        // Wait until it's rendered with width/height/viewbox
-        const bbox = svg.getBoundingClientRect();
-        if (bbox.width === 0 && bbox.height === 0 && !svg.getAttribute("viewBox")) {
-            return; // Not fully rendered yet
-        }
-        
-        svg.dataset.pngConverted = "true";
-
+async function svgStringToPngDataUrl(svgString, fallbackWidth = 800, fallbackHeight = 400) {
+    return new Promise((resolve) => {
         try {
-            const svgString = new XMLSerializer().serializeToString(svg);
+            if (!svgString) return resolve(null);
+            
+            // Ensure proper XML namespace
+            if (!svgString.includes('xmlns="http://www.w3.org/2000/svg"')) {
+                svgString = svgString.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+            }
+
+            // Extract dimensions
+            let width = fallbackWidth;
+            let height = fallbackHeight;
+
+            const wMatch = svgString.match(/width=["']([0-9.]+)(?:px)?["']/i);
+            const hMatch = svgString.match(/height=["']([0-9.]+)(?:px)?["']/i);
+            if (wMatch && hMatch) {
+                width = parseFloat(wMatch[1]);
+                height = parseFloat(hMatch[1]);
+            } else {
+                const vbMatch = svgString.match(/viewBox=["']([0-9.\s-]+)["']/i);
+                if (vbMatch) {
+                    const parts = vbMatch[1].trim().split(/\s+/);
+                    if (parts.length === 4) {
+                        width = parseFloat(parts[2]);
+                        height = parseFloat(parts[3]);
+                    }
+                }
+            }
+
+            if (!width || width <= 0 || isNaN(width)) width = 800;
+            if (!height || height <= 0 || isNaN(height)) height = 400;
+
             const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
             const blobURL = URL.createObjectURL(svgBlob);
-            
             const image = new Image();
+
+            const timer = setTimeout(() => {
+                URL.revokeObjectURL(blobURL);
+                const b64 = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgString)));
+                resolve(b64);
+            }, 3000);
+
             image.onload = () => {
+                clearTimeout(timer);
                 try {
+                    const scale = 2; // Crisp high-DPI scaling
                     const canvas = document.createElement("canvas");
-                    
-                    let width = bbox.width;
-                    let height = bbox.height;
-                    
-                    if (!width || !height) {
-                        const viewBoxAttr = svg.getAttribute("viewBox");
-                        if (viewBoxAttr) {
-                            const parts = viewBoxAttr.split(" ");
-                            if (parts.length === 4) {
-                                width = parseFloat(parts[2]);
-                                height = parseFloat(parts[3]);
-                            }
-                        }
-                    }
-                    
-                    if (!width) width = 800;
-                    if (!height) height = 400;
-                    
-                    const scale = 2; // High resolution scaling
-                    canvas.width = width * scale;
-                    canvas.height = height * scale;
+                    canvas.width = Math.max(width * scale, 400);
+                    canvas.height = Math.max(height * scale, 200);
                     
                     const context = canvas.getContext("2d");
                     context.scale(scale, scale);
-                    
-                    // Background white
+
+                    // Clean white background for documents
                     context.fillStyle = "#ffffff";
                     context.fillRect(0, 0, width, height);
-                    
+
                     context.drawImage(image, 0, 0, width, height);
                     const pngDataUrl = canvas.toDataURL("image/png");
-                    
-                    svg.dataset.pngUrl = pngDataUrl;
+                    URL.revokeObjectURL(blobURL);
+                    resolve(pngDataUrl);
                 } catch (e) {
                     console.error("Error drawing SVG to canvas:", e);
-                } finally {
                     URL.revokeObjectURL(blobURL);
+                    resolve("data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgString))));
                 }
             };
+
+            image.onerror = (e) => {
+                clearTimeout(timer);
+                console.error("Image load error:", e);
+                URL.revokeObjectURL(blobURL);
+                resolve("data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgString))));
+            };
+
             image.src = blobURL;
-        } catch (e) {
-            console.error("Error converting SVG to PNG:", e);
+        } catch (err) {
+            console.error("svgStringToPngDataUrl error:", err);
+            resolve(null);
         }
     });
 }
 
-function getHtmlContentForClipboard(elementId) {
-    const el = document.getElementById(elementId);
-    if (!el) return "";
-    
-    const clone = el.cloneNode(true);
-    
-    // Find all SVG elements in the clone
-    const svgs = clone.querySelectorAll("svg");
-    svgs.forEach((svg) => {
-        // Find the original SVG in the actual DOM to get its dataset
-        const originalSvgs = el.querySelectorAll("svg");
-        const index = Array.from(clone.querySelectorAll("svg")).indexOf(svg);
-        const originalSvg = originalSvgs[index];
+async function renderMermaidToPngDataUrl(mermaidCode) {
+    if (typeof mermaid === "undefined") return null;
+    try {
+        let clean = mermaidCode
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&')
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .trim();
+
+        // Strip markdown fences if present
+        clean = clean.replace(/^```mermaid\s*/i, '').replace(/```\s*$/, '').trim();
+        if (!clean) return null;
+
+        const id = "mermaid-export-" + (++mermaidRenderCounter) + "-" + Date.now();
+        const { svg } = await mermaid.render(id, clean);
+        if (!svg) return null;
+
+        return await svgStringToPngDataUrl(svg);
+    } catch (e) {
+        console.error("renderMermaidToPngDataUrl error:", e);
+        return null;
+    }
+}
+
+function convertMermaidToPng() {
+    const svgs = document.querySelectorAll(".mermaid svg");
+    svgs.forEach(async (svg) => {
+        if (svg.dataset.pngConverted) return;
         
-        if (originalSvg && originalSvg.dataset.pngUrl) {
-            const img = document.createElement("img");
-            img.src = originalSvg.dataset.pngUrl;
-            img.style.maxWidth = "100%";
-            img.style.border = "1px solid #e4e4e7";
-            img.style.borderRadius = "8px";
-            img.style.display = "block";
-            img.style.margin = "15px 0";
-            
-            // If the svg is inside a .mermaid wrapper, replace the .mermaid wrapper
-            const mermaidDiv = svg.closest(".mermaid");
-            if (mermaidDiv) {
-                mermaidDiv.parentNode.replaceChild(img, mermaidDiv);
-            } else {
-                svg.parentNode.replaceChild(img, svg);
+        const bbox = svg.getBoundingClientRect();
+        if (bbox.width === 0 && bbox.height === 0 && !svg.getAttribute("viewBox")) {
+            return;
+        }
+        
+        svg.dataset.pngConverted = "true";
+        try {
+            const svgString = new XMLSerializer().serializeToString(svg);
+            const pngDataUrl = await svgStringToPngDataUrl(svgString, bbox.width, bbox.height);
+            if (pngDataUrl) {
+                svg.dataset.pngUrl = pngDataUrl;
             }
+        } catch (e) {
+            console.error("Error in convertMermaidToPng:", e);
         }
     });
+}
+
+async function prepareHtmlForClipboard(rawMarkdownOrHtml, elementId = null) {
+    let html = "";
     
-    return clone.innerHTML;
+    // If elementId is provided and exists in the current DOM
+    if (elementId) {
+        const el = document.getElementById(elementId);
+        if (el) {
+            const clone = el.cloneNode(true);
+            const originalDivs = el.querySelectorAll(".mermaid");
+            const cloneDivs = clone.querySelectorAll(".mermaid");
+            
+            for (let i = 0; i < cloneDivs.length; i++) {
+                const origDiv = originalDivs[i];
+                const cloneDiv = cloneDivs[i];
+                const svg = origDiv?.querySelector("svg");
+                
+                let pngUrl = svg?.dataset?.pngUrl;
+                if (!pngUrl && svg) {
+                    const svgString = new XMLSerializer().serializeToString(svg);
+                    pngUrl = await svgStringToPngDataUrl(svgString);
+                }
+                if (!pngUrl) {
+                    const code = origDiv?.dataset?.code ? decodeURIComponent(origDiv.dataset.code) : (origDiv?.textContent || "");
+                    pngUrl = await renderMermaidToPngDataUrl(code);
+                }
+                
+                if (pngUrl) {
+                    const img = document.createElement("img");
+                    img.src = pngUrl;
+                    img.style.maxWidth = "100%";
+                    img.style.border = "1px solid #e4e4e7";
+                    img.style.borderRadius = "8px";
+                    img.style.display = "block";
+                    img.style.margin = "16px auto";
+                    
+                    const wrapper = document.createElement("div");
+                    wrapper.style.textAlign = "center";
+                    wrapper.style.margin = "16px 0";
+                    wrapper.appendChild(img);
+                    
+                    cloneDiv.parentNode.replaceChild(wrapper, cloneDiv);
+                }
+            }
+            
+            html = clone.innerHTML;
+        }
+    }
+    
+    if (!html) {
+        // Parse markdown directly
+        html = marked.parse(rawMarkdownOrHtml || "");
+    }
+    
+    // Process any remaining mermaid code blocks in html:
+    // 1. <pre><code class="language-mermaid">...</code></pre>
+    // 2. <div class="mermaid">...</div>
+    const mermaidCodeRegex = /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/gi;
+    let match;
+    const replacements = [];
+    while ((match = mermaidCodeRegex.exec(html)) !== null) {
+        replacements.push({ target: match[0], code: match[1] });
+    }
+    
+    const divMermaidRegex = /<div class="mermaid"[^>]*>([\s\S]*?)<\/div>/gi;
+    while ((match = divMermaidRegex.exec(html)) !== null) {
+        replacements.push({ target: match[0], code: match[1] });
+    }
+    
+    for (const item of replacements) {
+        const pngUrl = await renderMermaidToPngDataUrl(item.code);
+        if (pngUrl) {
+            const imgHtml = `<div style="text-align: center; margin: 16px 0;"><img src="${pngUrl}" style="max-width: 100%; border: 1px solid #e4e4e7; border-radius: 8px; display: inline-block;" alt="Mermaid Diagram"></div>`;
+            html = html.replace(item.target, imgHtml);
+        }
+    }
+    
+    return html;
 }
 
 function stripMarkdown(text) {
@@ -871,13 +998,6 @@ function stripMarkdown(text) {
         .replace(/^[\-\*]\s+/gm, "• ")    // list markers
         .replace(/^\d+\.\s+/gm, (m) => m) // keep numbered lists
         .trim();
-}
-
-function _cleanHtmlClipboard(html) {
-    // Keep base64 diagram images (so they can be pasted directly into MS Word / Google Docs)
-    // Convert mermaid divs into styled pre/code blocks so the mermaid code is preserved when pasting as HTML
-    return html
-        .replace(/<div class="mermaid">([\s\S]*?)<\/div>/gi, '<pre style="background:#f4f4f5; padding:12px; border:2px solid #000000; border-radius:8px; font-family:monospace; color:#18181b; margin:15px 0; box-shadow:3px 3px 0px #000000;"><strong>[Mermaid Diagram Code]</strong><br>$1</pre>');
 }
 
 function _copyFallback(text) {
@@ -897,31 +1017,35 @@ function _copyFallback(text) {
     document.body.removeChild(ta);
 }
 
-function _clipboardWrite(htmlContent, plainText, successMsg = "Copied!") {
+async function _clipboardWrite(htmlContent, plainText, successMsg = "Copied!") {
     if (navigator.clipboard && navigator.clipboard.write) {
         try {
-            const cleanHtml = `<html><body>${_cleanHtmlClipboard(htmlContent)}</body></html>`;
-            navigator.clipboard.write([
+            const cleanHtml = `<!DOCTYPE html><html><body>${htmlContent}</body></html>`;
+            await navigator.clipboard.write([
                 new ClipboardItem({
                     "text/html": new Blob([cleanHtml], { type: "text/html" }),
                     "text/plain": new Blob([plainText], { type: "text/plain" }),
                 }),
-            ]).then(() => showToast(successMsg)).catch(() => {
-                navigator.clipboard.writeText(plainText).then(
-                    () => showToast(successMsg)
-                ).catch(() => _copyFallback(plainText));
-            });
-        } catch {
-            _copyFallback(plainText);
+            ]);
+            showToast(successMsg, "success");
+            return;
+        } catch (e) {
+            console.warn("Clipboard write failed, falling back to writeText:", e);
         }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(plainText).then(
+            () => showToast(successMsg, "success")
+        ).catch(() => _copyFallback(plainText));
     } else {
         _copyFallback(plainText);
     }
 }
 
-function copyJournal() {
-    const rawHtml = getHtmlContentForClipboard("journal-content") || renderMarkdown(currentJournal);
-    _clipboardWrite(rawHtml, currentJournal.trim());
+async function copyJournal() {
+    showToast("Menyiapkan naskah & diagram...", "info");
+    const rawHtml = await prepareHtmlForClipboard(currentJournal, "journal-content");
+    await _clipboardWrite(rawHtml, currentJournal.trim(), "Naskah jurnal berhasil disalin (diagram otomatis jadi gambar)!");
 }
 
 function copyPlainText() {
@@ -1366,16 +1490,21 @@ async function restructureDoc() {
     const language = document.getElementById("restructure-language").value;
 
     if (!templateId) {
-        alert("Select a target template.");
+        showToast("Pilih template target terlebih dahulu.", "warning");
         return;
     }
     if (!restructureSourceText) {
-        alert("Parse a source document first.");
+        showToast("Parse dokumen sumber terlebih dahulu.", "warning");
         return;
     }
 
-    showLoading();
-    updateLoading("Restructuring document...", `Using template: ${templates.find(t => t.id === templateId)?.name || templateId}`);
+    const loadEl = document.getElementById("restructure-loading");
+    const btnEl = document.getElementById("restructure-btn");
+    if (loadEl) {
+        loadEl.classList.remove("d-none");
+        loadEl.classList.add("d-flex");
+    }
+    if (btnEl) btnEl.disabled = true;
 
     const provider = document.getElementById("provider").value;
     const providerModel =
@@ -1407,7 +1536,11 @@ async function restructureDoc() {
         if (!resp.ok) throw new Error(await resp.text());
 
         const data = await resp.json();
-        hideLoading();
+        if (loadEl) {
+            loadEl.classList.add("d-none");
+            loadEl.classList.remove("d-flex");
+        }
+        if (btnEl) btnEl.disabled = false;
 
         document.getElementById("restructure-result-section").style.display = "";
         const rcEl = document.getElementById("restructured-content");
@@ -1423,18 +1556,24 @@ async function restructureDoc() {
             }
         }
 
-        document.getElementById("restructured-content").scrollIntoView({ behavior: "smooth" });
+        document.getElementById("restructure-result-section").scrollIntoView({ behavior: "smooth" });
+        showToast("Restrukturisasi dokumen berhasil!", "success");
     } catch (err) {
-        updateLoading("Restructure failed", err.message.substring(0, 300), true);
-        setTimeout(hideLoading, 8000);
+        if (loadEl) {
+            loadEl.classList.add("d-none");
+            loadEl.classList.remove("d-flex");
+        }
+        if (btnEl) btnEl.disabled = false;
+        showToast("Restructure failed: " + err.message.substring(0, 300), "danger");
     }
 }
 
-function copyRestructured() {
+async function copyRestructured() {
     const el = document.getElementById("restructured-content");
     const rawMarkdown = el.dataset.raw || el.textContent || "";
-    const rawHtml = getHtmlContentForClipboard("restructured-content") || renderMarkdown(rawMarkdown);
-    _clipboardWrite(rawHtml, rawMarkdown.trim());
+    showToast("Menyiapkan naskah & diagram...", "info");
+    const rawHtml = await prepareHtmlForClipboard(rawMarkdown, "restructured-content");
+    await _clipboardWrite(rawHtml, rawMarkdown.trim(), "Naskah berhasil disalin (diagram otomatis jadi gambar)!");
 }
 
 function downloadRestructured() {
@@ -1568,17 +1707,22 @@ async function reviseWithReview() {
     const sourceText = document.getElementById("review-document").value.trim();
     const reviewText = document.getElementById("review-text").value.trim();
     const language = document.getElementById("review-language").value;
-    if (!sourceText) { showToast("Please paste the original document first.", "warning"); return; }
-    if (!reviewText) { showToast("Please paste the reviewer feedback.", "warning"); return; }
+    if (!sourceText) { showToast("Tempelkan teks dokumen asli terlebih dahulu.", "warning"); return; }
+    if (!reviewText) { showToast("Tempelkan masukan reviewer terlebih dahulu.", "warning"); return; }
+
+    const loadEl = document.getElementById("review-loading");
+    const btnEl = document.getElementById("revise-btn");
+    if (loadEl) {
+        loadEl.classList.remove("d-none");
+        loadEl.classList.add("d-flex");
+    }
+    if (btnEl) btnEl.disabled = true;
+    document.getElementById("review-result-section").style.display = "none";
 
     const provider = document.getElementById("provider").value;
     const providerModel = document.getElementById("provider-model").value;
     const providerBaseUrl = document.getElementById("provider-base-url").value;
     const apiKey = document.getElementById("llm-api-key").value;
-
-    updateLoading("Revising document based on reviewer feedback...");
-    showLoading();
-    document.getElementById("review-result-section").style.display = "none";
 
     try {
         const resp = await fetch(`${API_BASE}/api/revise`, {
@@ -1598,25 +1742,35 @@ async function reviseWithReview() {
         if (!resp.ok) throw new Error(await resp.text());
 
         const data = await resp.json();
-        hideLoading();
+        if (loadEl) {
+            loadEl.classList.add("d-none");
+            loadEl.classList.remove("d-flex");
+        }
+        if (btnEl) btnEl.disabled = false;
 
         document.getElementById("review-result-section").style.display = "";
         const rcEl = document.getElementById("review-content");
         rcEl.innerHTML = renderMarkdown(data.revised_text);
         rcEl.dataset.raw = data.revised_text;
 
-        document.getElementById("review-content").scrollIntoView({ behavior: "smooth" });
+        document.getElementById("review-result-section").scrollIntoView({ behavior: "smooth" });
+        showToast("Revisi dokumen selesai!", "success");
     } catch (err) {
-        hideLoading();
+        if (loadEl) {
+            loadEl.classList.add("d-none");
+            loadEl.classList.remove("d-flex");
+        }
+        if (btnEl) btnEl.disabled = false;
         showToast("Revise failed: " + err.message.substring(0, 300), "danger");
     }
 }
 
-function copyReviewResult() {
+async function copyReviewResult() {
     const el = document.getElementById("review-content");
     const rawMarkdown = el.dataset.raw || el.textContent || "";
-    const rawHtml = getHtmlContentForClipboard("review-content") || renderMarkdown(rawMarkdown);
-    _clipboardWrite(rawHtml, rawMarkdown.trim());
+    showToast("Menyiapkan naskah & diagram...", "info");
+    const rawHtml = await prepareHtmlForClipboard(rawMarkdown, "review-content");
+    await _clipboardWrite(rawHtml, rawMarkdown.trim(), "Naskah hasil revisi berhasil disalin!");
 }
 
 function downloadReviewResult() {
@@ -1637,17 +1791,22 @@ async function translateDoc() {
     const sourceText = document.getElementById("translate-source-text").value.trim();
     const srcLang = document.getElementById("translate-source-lang").value;
     const tgtLang = document.getElementById("translate-target-lang").value;
-    if (!sourceText) { showToast("Please paste the document text to translate.", "warning"); return; }
-    if (srcLang === tgtLang) { showToast("Source and target languages must differ.", "warning"); return; }
+    if (!sourceText) { showToast("Tempelkan teks dokumen yang ingin diterjemahkan.", "warning"); return; }
+    if (srcLang === tgtLang) { showToast("Bahasa sumber dan target harus berbeda.", "warning"); return; }
+
+    const loadEl = document.getElementById("translate-loading");
+    const btnEl = document.getElementById("translate-btn");
+    if (loadEl) {
+        loadEl.classList.remove("d-none");
+        loadEl.classList.add("d-flex");
+    }
+    if (btnEl) btnEl.disabled = true;
+    document.getElementById("translate-result-section").style.display = "none";
 
     const provider = document.getElementById("provider").value;
     const providerModel = document.getElementById("provider-model").value;
     const providerBaseUrl = document.getElementById("provider-base-url").value;
     const apiKey = document.getElementById("llm-api-key").value;
-
-    updateLoading("Translating...");
-    showLoading();
-    document.getElementById("translate-result-section").style.display = "none";
 
     try {
         const resp = await fetch(`${API_BASE}/api/translate`, {
@@ -1667,7 +1826,11 @@ async function translateDoc() {
         if (!resp.ok) throw new Error(await resp.text());
 
         const data = await resp.json();
-        hideLoading();
+        if (loadEl) {
+            loadEl.classList.add("d-none");
+            loadEl.classList.remove("d-flex");
+        }
+        if (btnEl) btnEl.disabled = false;
 
         document.getElementById("translate-result-section").style.display = "";
         const outEl = document.getElementById("translate-output");
@@ -1681,18 +1844,24 @@ async function translateDoc() {
             badge.textContent = "";
         }
 
-        outEl.scrollIntoView({ behavior: "smooth" });
+        document.getElementById("translate-result-section").scrollIntoView({ behavior: "smooth" });
+        showToast("Penerjemahan dokumen selesai!", "success");
     } catch (err) {
-        hideLoading();
-        showToast("Translation failed: " + err.message.substring(0, 300), "danger");
+        if (loadEl) {
+            loadEl.classList.add("d-none");
+            loadEl.classList.remove("d-flex");
+        }
+        if (btnEl) btnEl.disabled = false;
+        showToast("Translate failed: " + err.message.substring(0, 300), "danger");
     }
 }
 
-function copyTranslated() {
+async function copyTranslated() {
     const el = document.getElementById("translate-output");
     const rawMarkdown = el.dataset.raw || el.textContent || "";
-    const rawHtml = getHtmlContentForClipboard("translate-output") || renderMarkdown(rawMarkdown);
-    _clipboardWrite(rawHtml, rawMarkdown.trim());
+    showToast("Menyiapkan naskah...", "info");
+    const rawHtml = await prepareHtmlForClipboard(rawMarkdown, "translate-output");
+    await _clipboardWrite(rawHtml, rawMarkdown.trim(), "Hasil terjemahan berhasil disalin!");
 }
 
 function downloadTranslated() {
@@ -1767,17 +1936,53 @@ async function analyzeIdea() {
         // Populate fields
         document.getElementById("idea-extracted-text").value = data.draft_idea;
         document.getElementById("idea-search-query").value = data.search_query;
+        if (document.getElementById("idea-search-topic")) {
+            document.getElementById("idea-search-topic").value = data.search_query;
+        }
         
         // Show panel
         document.getElementById("idea-analysis-panel").style.display = "";
         showToast("Draf berhasil dianalisis!", "success");
 
-        // Automatically trigger OpenAlex references search
-        searchIdeaReferences();
+        // Automatically trigger OpenAlex references search with configured filters
+        searchIdeaReferences(true);
     } catch (err) {
         hideLoading();
         showToast("Gagal menganalisis draf: " + err.message, "danger");
     }
+}
+
+async function searchDirectIdeaPapers() {
+    const topicInput = document.getElementById("idea-search-topic");
+    const queryInput = document.getElementById("idea-search-query");
+    let query = (topicInput?.value || queryInput?.value || "").trim();
+
+    if (!query) {
+        const fileInput = document.getElementById("idea-file-input");
+        if (fileInput?.files?.length) {
+            query = fileInput.files[0].name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+            if (topicInput) topicInput.value = query;
+        }
+    }
+
+    if (!query) {
+        alert("Silakan masukkan topik / kata kunci pencarian terlebih dahulu.");
+        topicInput?.focus();
+        return;
+    }
+
+    if (queryInput) queryInput.value = query;
+    if (topicInput) topicInput.value = query;
+
+    // Ensure extracted text has basic topic context if user searched directly without draft analysis
+    const extractedEl = document.getElementById("idea-extracted-text");
+    if (extractedEl && !extractedEl.value.trim()) {
+        extractedEl.value = `Topik Penelitian: ${query}\n(Kajian dan penulisan komprehensif berdasarkan referensi ilmiah terkini)`;
+    }
+
+    // Show panel
+    document.getElementById("idea-analysis-panel").style.display = "";
+    await searchIdeaReferences(true);
 }
 
 function renderIdeaReferencesTable() {
@@ -1785,7 +1990,7 @@ function renderIdeaReferencesTable() {
     document.getElementById("idea-ref-count").textContent = `${ideaSearchPapers.length} ditemukan`;
 
     if (ideaSearchPapers.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Tidak ada referensi yang ditemukan.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4"><i class="bi bi-info-circle me-1"></i>Tidak ada referensi yang ditemukan. Coba gunakan kata kunci lain atau perpanjang rentang tahun (Year Range).</td></tr>';
         return;
     }
 
@@ -1793,30 +1998,65 @@ function renderIdeaReferencesTable() {
     ideaSearchPapers.forEach((paper, idx) => {
         const tr = document.createElement("tr");
 
+        // Checkbox
         const tdCheck = document.createElement("td");
-        tdCheck.innerHTML = `<input type="checkbox" class="idea-paper-checkbox" data-idx="${idx}" checked>`;
+        tdCheck.className = "text-center align-top pt-3";
+        tdCheck.innerHTML = `<input type="checkbox" class="form-check-input idea-paper-checkbox" data-idx="${idx}" checked>`;
         tr.appendChild(tdCheck);
 
+        // Title + Metadata + Collapsible Abstract
         const tdTitle = document.createElement("td");
-        tdTitle.className = "fw-semibold";
-        tdTitle.innerHTML = paper.title;
-        tr.appendChild(tdTitle);
-
-        const tdAuthors = document.createElement("td");
+        tdTitle.className = "align-top py-2";
+        
         const firstAuthor = paper.authors?.length ? paper.authors[0] : "Unknown";
         const authorStr = paper.authors?.length > 1 ? `${firstAuthor} et al.` : firstAuthor;
-        tdAuthors.textContent = `${authorStr} (${paper.year || "n.d."})`;
+        const yearStr = paper.year ? `(${paper.year})` : "";
+        const sourceStr = paper.source ? ` - ${escapeHtml(paper.source)}` : "";
+        const doiStr = paper.doi ? `<a href="https://doi.org/${encodeURIComponent(paper.doi)}" target="_blank" class="doi-badge ms-1" title="Open DOI">DOI:${escapeHtml(paper.doi)}</a>` : "";
+        const oaStr = paper.openalex_url ? `<a href="${escapeHtml(paper.openalex_url)}" target="_blank" class="oa-link ms-1" title="OpenAlex Link"><i class="bi bi-box-arrow-up-right"></i></a>` : "";
+        
+        let abstractHtml = "";
+        if (paper.abstract) {
+            const shortAbs = paper.abstract.length > 250 ? escapeHtml(paper.abstract.substring(0, 250)) + "..." : escapeHtml(paper.abstract);
+            const fullAbs = escapeHtml(paper.abstract);
+            abstractHtml = `
+                <div class="paper-abstract mt-1 text-muted small" id="idea-abs-${idx}" style="cursor: pointer;" onclick="toggleIdeaAbstract(${idx})" title="Klik untuk lihat abstrak lengkap">
+                    <span class="idea-abs-short">${shortAbs}</span>
+                    <span class="idea-abs-full d-none">${fullAbs}</span>
+                    ${paper.abstract.length > 250 ? '<span class="text-primary ms-1 fw-semibold idea-abs-toggle">[+ more]</span>' : ''}
+                </div>`;
+        } else {
+            abstractHtml = '<div class="text-muted small fst-italic mt-1">No abstract available</div>';
+        }
+
+        tdTitle.innerHTML = `
+            <div class="fw-bold text-primary mb-1">${escapeHtml(paper.title)}</div>
+            <div class="paper-meta small text-muted mb-1">
+                ${authorStr} ${yearStr}${sourceStr} ${doiStr} ${oaStr}
+            </div>
+            ${abstractHtml}
+        `;
+        tr.appendChild(tdTitle);
+
+        // Authors & Year column
+        const tdAuthors = document.createElement("td");
+        tdAuthors.className = "align-top small py-2";
+        tdAuthors.textContent = `${authorStr} ${yearStr}`;
         tr.appendChild(tdAuthors);
 
+        // Citations
         const tdCites = document.createElement("td");
-        tdCites.textContent = paper.cited_by_count || 0;
+        tdCites.className = "align-top small text-center py-2";
+        tdCites.innerHTML = `<span class="badge bg-secondary">${paper.cited_by_count || 0}</span>`;
         tr.appendChild(tdCites);
 
+        // Actions
         const tdActions = document.createElement("td");
+        tdActions.className = "align-top text-center py-2";
         if (paper.source === "manual") {
             tdActions.innerHTML = '<span class="badge bg-success"><i class="bi bi-file-earmark-text me-1"></i>Manual</span>';
         } else if (paper.pdf_url) {
-            tdActions.innerHTML = `<a href="${paper.pdf_url}" target="_blank" class="btn btn-sm btn-outline-secondary py-0"><i class="bi bi-file-earmark-pdf"></i> PDF</a>`;
+            tdActions.innerHTML = `<a href="${paper.pdf_url}" target="_blank" class="btn btn-sm btn-outline-primary py-0"><i class="bi bi-file-earmark-pdf"></i> PDF</a>`;
         } else {
             tdActions.innerHTML = '<span class="text-muted small">No PDF</span>';
         }
@@ -1826,27 +2066,67 @@ function renderIdeaReferencesTable() {
     });
 }
 
-async function searchIdeaReferences() {
-    const query = document.getElementById("idea-search-query").value.trim();
+function toggleIdeaAbstract(idx) {
+    const el = document.getElementById(`idea-abs-${idx}`);
+    if (!el) return;
+    const shortSpan = el.querySelector(".idea-abs-short");
+    const fullSpan = el.querySelector(".idea-abs-full");
+    const toggleSpan = el.querySelector(".idea-abs-toggle");
+    if (shortSpan && fullSpan) {
+        const isCollapsed = fullSpan.classList.contains("d-none");
+        if (isCollapsed) {
+            shortSpan.classList.add("d-none");
+            fullSpan.classList.remove("d-none");
+            if (toggleSpan) toggleSpan.textContent = "[- less]";
+        } else {
+            shortSpan.classList.remove("d-none");
+            fullSpan.classList.add("d-none");
+            if (toggleSpan) toggleSpan.textContent = "[+ more]";
+        }
+    }
+}
+
+async function searchIdeaReferences(scroll = false) {
+    const queryEl = document.getElementById("idea-search-query");
+    const topicEl = document.getElementById("idea-search-topic");
+    let query = (queryEl?.value || topicEl?.value || "").trim();
+    
     if (!query) {
         alert("Query pencarian tidak boleh kosong.");
         return;
     }
+
+    if (queryEl) queryEl.value = query;
+    if (topicEl) topicEl.value = query;
 
     const refsCard = document.getElementById("idea-references-card");
     const tableBody = document.getElementById("idea-ref-table").querySelector("tbody");
     tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div>Mencari referensi OpenAlex...</td></tr>';
     refsCard.style.display = "";
 
+    if (scroll) {
+        refsCard.scrollIntoView({ behavior: "smooth" });
+    }
+
     try {
-        const url = `${API_BASE}/api/search`;
+        const yearRange = parseInt(document.getElementById("idea-year-range")?.value || document.getElementById("year-range")?.value || "3") || 0;
+        const maxPapers = parseInt(document.getElementById("idea-max-papers")?.value || document.getElementById("max-papers")?.value || "15") || 15;
+        const openalexApiKey = document.getElementById("openalex-api-key")?.value?.trim() || null;
+        const language = document.getElementById("idea-language")?.value || "id";
+
         const body = {
             theme: query,
-            max_papers: 15,
-            language: document.getElementById("idea-language").value,
+            max_papers: maxPapers,
+            language: language,
+            openalex_api_key: openalexApiKey,
         };
 
-        const resp = await fetch(url, {
+        const currentYear = new Date().getFullYear();
+        if (yearRange > 0) {
+            body.from_year = currentYear - yearRange;
+        }
+
+        const resp = await fetch(`${API_BASE}/api/search`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -1866,10 +2146,15 @@ async function searchIdeaReferences() {
 }
 
 function toggleAllIdeaRefs() {
-    const checked = document.getElementById("idea-select-all").checked;
-    document.querySelectorAll(".idea-paper-checkbox").forEach((cb) => {
-        cb.checked = checked;
+    const selectAllChk = document.getElementById("idea-select-all");
+    const checkboxes = document.querySelectorAll(".idea-paper-checkbox");
+    const allAreChecked = Array.from(checkboxes).every(cb => cb.checked);
+    const newCheckedState = allAreChecked ? false : true;
+    
+    checkboxes.forEach((cb) => {
+        cb.checked = newCheckedState;
     });
+    if (selectAllChk) selectAllChk.checked = newCheckedState;
 }
 
 async function generateFromIdea() {
@@ -1962,6 +2247,16 @@ async function generateFromIdea() {
                             editor.value = entry.journal;
                             spinner.style.display = "none";
                             showToast("Penulisan naskah selesai!", "success");
+
+                            // Auto-save generated draft
+                            saveDraft({
+                                title: document.getElementById("idea-search-topic")?.value.trim() || document.getElementById("idea-search-query")?.value.trim() || "Draf Ide",
+                                content: entry.journal,
+                                mode: `Ide ke Jurnal (${document.getElementById("idea-mode")?.value || "journal"})`,
+                                language: document.getElementById("idea-language")?.value || "id",
+                                inLibrary: document.getElementById("idea-library")?.checked || false,
+                            }, false);
+
                             editor.scrollIntoView({ behavior: "smooth" });
                         } else if (entry.type === "error") {
                             const p = document.createElement("p");
@@ -1985,12 +2280,16 @@ async function generateFromIdea() {
     }
 }
 
-function copyIdeaResult() {
+async function copyIdeaResult() {
     const editor = document.getElementById("idea-output-editor");
     const rawMarkdown = editor.value.trim();
-    if (!rawMarkdown) return;
-    const rawHtml = renderMarkdown(rawMarkdown);
-    _clipboardWrite(rawHtml, rawMarkdown);
+    if (!rawMarkdown) {
+        showToast("Belum ada naskah yang di-generate", "warning");
+        return;
+    }
+    showToast("Menyiapkan naskah & diagram...", "info");
+    const rawHtml = await prepareHtmlForClipboard(rawMarkdown);
+    await _clipboardWrite(rawHtml, rawMarkdown, "Naskah draf berhasil disalin (diagram otomatis jadi gambar)!");
 }
 
 function downloadIdeaResult() {
@@ -2102,17 +2401,18 @@ function renderIdeaCollectedPapers() {
 
     container.innerHTML = ideaCollectedPapers
         .map((p, i) => `
-            <div class="paper-item p-3 border-bottom">
+            <div class="paper-item">
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="flex-grow-1 me-3">
-                        <div class="paper-title fw-semibold text-dark mb-1">${escapeHtml(p.title)}</div>
-                        <div class="paper-meta text-muted small">
+                        <div class="paper-title">${escapeHtml(p.title)}</div>
+                        <div class="paper-meta">
                             ${(p.authors || []).slice(0, 3).join(", ")}${p.authors.length > 3 ? " et al." : ""}
                             ${p.year ? ` (${p.year})` : ""}
                             ${p.source ? ` - ${escapeHtml(p.source)}` : ""}
+                            ${p.doi ? `<a href="https://doi.org/${encodeURIComponent(p.doi)}" target="_blank" class="doi-badge ms-1" title="Open DOI">DOI:${escapeHtml(p.doi)}</a>` : ""}
                         </div>
                     </div>
-                    <button class="btn btn-sm btn-outline-danger" onclick="removeFromIdeaCollection(${i})" title="Remove">
+                    <button class="btn btn-sm btn-outline-danger" onclick="removeFromIdeaCollection(${i})" title="Hapus dari koleksi">
                         <i class="bi bi-x-lg"></i>
                     </button>
                 </div>
@@ -2120,3 +2420,871 @@ function renderIdeaCollectedPapers() {
         `)
         .join("");
 }
+
+// ---- Drafts & AI Library Management ----
+
+function getSavedDrafts() {
+    try {
+        const raw = localStorage.getItem("autojurnal-saved-drafts");
+        return raw ? JSON.parse(raw) : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveDraftsArray(drafts) {
+    try {
+        localStorage.setItem("autojurnal-saved-drafts", JSON.stringify(drafts));
+        updateDraftsBadge();
+    } catch (e) {
+        console.error("Failed to save drafts array:", e);
+    }
+}
+
+function updateDraftsBadge() {
+    const drafts = getSavedDrafts();
+    const badge = document.getElementById("drafts-count-badge");
+    if (badge) {
+        badge.textContent = drafts.length;
+    }
+}
+
+function extractTitleFromMarkdown(md, fallback = "Untitled Draft") {
+    if (!md) return fallback;
+    const match = md.match(/^#+\s+(.+)$/m);
+    if (match && match[1]) {
+        return match[1].replace(/[*_`]/g, "").trim();
+    }
+    return fallback;
+}
+
+function saveDraft(draftObj, showToastMsg = true) {
+    if (!draftObj || !draftObj.content || !draftObj.content.trim()) return null;
+    
+    const drafts = getSavedDrafts();
+    const title = draftObj.title || extractTitleFromMarkdown(draftObj.content, "Draft " + new Date().toLocaleDateString("id-ID"));
+    
+    // Check if duplicate existing draft by content or ID
+    const existingIndex = drafts.findIndex(d => (draftObj.id && d.id === draftObj.id) || d.content.trim() === draftObj.content.trim());
+    
+    const nowStr = new Date().toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+    const wordsCount = draftObj.content.trim().split(/\s+/).length;
+    
+    const newRecord = {
+        id: (existingIndex >= 0 ? drafts[existingIndex].id : null) || draftObj.id || "draft-" + Date.now() + "-" + Math.random().toString(36).substr(2, 6),
+        title: title,
+        content: draftObj.content,
+        mode: draftObj.mode || "journal",
+        language: draftObj.language || "id",
+        createdAt: draftObj.createdAt || nowStr,
+        wordsCount: wordsCount,
+        inLibrary: draftObj.inLibrary || false,
+        libraryWorkId: draftObj.libraryWorkId || null,
+        paperTitles: draftObj.paperTitles || [],
+    };
+    
+    if (existingIndex >= 0) {
+        drafts[existingIndex] = { ...drafts[existingIndex], ...newRecord };
+    } else {
+        drafts.unshift(newRecord);
+    }
+    
+    if (drafts.length > 100) drafts.pop();
+    
+    saveDraftsArray(drafts);
+    
+    if (showToastMsg) {
+        showToast(`Draf "${title.substring(0, 35)}..." berhasil disimpan!`, "success");
+    }
+    
+    return newRecord;
+}
+
+function saveCurrentJournalDraft() {
+    if (!currentJournal || !currentJournal.trim()) {
+        showToast("Belum ada jurnal yang di-generate untuk disimpan", "warning");
+        return;
+    }
+    const themeInput = document.getElementById("paper-title")?.value.trim() || document.getElementById("theme")?.value.trim();
+    const mode = document.getElementById("mode")?.value || "journal";
+    const lang = document.getElementById("language")?.value || "en";
+    
+    saveDraft({
+        title: themeInput || extractTitleFromMarkdown(currentJournal),
+        content: currentJournal,
+        mode: mode,
+        language: lang,
+    }, true);
+}
+
+function saveCurrentIdeaDraft() {
+    const editor = document.getElementById("idea-output-editor");
+    const content = editor?.value?.trim();
+    if (!content) {
+        showToast("Belum ada naskah yang di-generate untuk disimpan", "warning");
+        return;
+    }
+    const themeInput = document.getElementById("idea-search-topic")?.value.trim() || document.getElementById("idea-search-query")?.value.trim();
+    const mode = document.getElementById("idea-mode")?.value || "journal";
+    const lang = document.getElementById("idea-language")?.value || "id";
+    
+    saveDraft({
+        title: themeInput || extractTitleFromMarkdown(content),
+        content: content,
+        mode: `Ide ke Jurnal (${mode})`,
+        language: lang,
+    }, true);
+}
+
+async function addCurrentJournalToAiLibrary() {
+    if (!currentJournal || !currentJournal.trim()) {
+        showToast("Belum ada jurnal yang di-generate", "warning");
+        return;
+    }
+    const theme = document.getElementById("paper-title")?.value.trim() || document.getElementById("theme")?.value.trim() || extractTitleFromMarkdown(currentJournal);
+    const mode = document.getElementById("mode")?.value || "journal";
+    const lang = document.getElementById("language")?.value || "en";
+    const provider = document.getElementById("provider")?.value || "manual";
+    const paperTitles = collectedPapers.map(p => p.title || "").filter(Boolean);
+    
+    try {
+        const resp = await fetch(`${API_BASE}/api/works`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                theme: theme,
+                content: currentJournal,
+                language: lang,
+                mode: mode,
+                provider: provider,
+                paper_titles: paperTitles,
+            })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        
+        saveDraft({
+            title: theme,
+            content: currentJournal,
+            mode: mode,
+            language: lang,
+            inLibrary: true,
+            libraryWorkId: data.work_id,
+            paperTitles: paperTitles,
+        }, false);
+        
+        showToast("Naskah berhasil didaftarkan ke Library AI! (AI akan otomatis mencegah plagiasi saat 'Librarian' aktif)", "success");
+    } catch (e) {
+        showToast("Gagal mendaftarkan ke Library AI: " + e.message, "danger");
+    }
+}
+
+async function addCurrentIdeaToAiLibrary() {
+    const editor = document.getElementById("idea-output-editor");
+    const content = editor?.value?.trim();
+    if (!content) {
+        showToast("Belum ada naskah yang di-generate", "warning");
+        return;
+    }
+    const theme = document.getElementById("idea-search-topic")?.value.trim() || document.getElementById("idea-search-query")?.value.trim() || extractTitleFromMarkdown(content);
+    const mode = document.getElementById("idea-mode")?.value || "journal";
+    const lang = document.getElementById("idea-language")?.value || "id";
+    const provider = document.getElementById("provider")?.value || "manual";
+    const paperTitles = ideaCollectedPapers.map(p => p.title || "").filter(Boolean);
+    
+    try {
+        const resp = await fetch(`${API_BASE}/api/works`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                theme: theme,
+                content: content,
+                language: lang,
+                mode: mode,
+                provider: provider,
+                paper_titles: paperTitles,
+            })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        
+        saveDraft({
+            title: theme,
+            content: content,
+            mode: `Ide ke Jurnal (${mode})`,
+            language: lang,
+            inLibrary: true,
+            libraryWorkId: data.work_id,
+            paperTitles: paperTitles,
+        }, false);
+        
+        showToast("Naskah berhasil didaftarkan ke Library AI! (AI akan otomatis mencegah plagiasi saat 'Librarian' aktif)", "success");
+    } catch (e) {
+        showToast("Gagal mendaftarkan ke Library AI: " + e.message, "danger");
+    }
+}
+
+async function syncAiLibraryDrafts() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/works`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const works = data.works || [];
+        const drafts = getSavedDrafts();
+        
+        let addedCount = 0;
+        for (const w of works) {
+            const exists = drafts.some(d => d.libraryWorkId === w.work_id || d.title === w.theme);
+            if (!exists) {
+                drafts.push({
+                    id: "work-" + w.work_id,
+                    title: w.theme,
+                    content: w.content || `[Karya dari Library AI: ${w.theme}]`,
+                    mode: w.mode || "journal",
+                    language: w.language || "id",
+                    createdAt: w.created_at ? new Date(w.created_at).toLocaleString("id-ID") : "Sebelumnya",
+                    wordsCount: (w.content || "").split(/\s+/).length,
+                    inLibrary: true,
+                    libraryWorkId: w.work_id,
+                    paperTitles: w.paper_titles || [],
+                });
+                addedCount++;
+            }
+        }
+        
+        if (addedCount > 0) {
+            saveDraftsArray(drafts);
+            showToast(`Sinkronisasi selesai! ${addedCount} karya dari Library AI dimuat.`, "info");
+        } else {
+            showToast("Library AI sudah tersinkron!", "success");
+        }
+        
+        renderDraftsList();
+    } catch (e) {
+        console.error("syncAiLibraryDrafts error:", e);
+    }
+}
+
+async function addDraftToAiLibrary(draftId) {
+    const drafts = getSavedDrafts();
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+    
+    try {
+        const resp = await fetch(`${API_BASE}/api/works`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                theme: draft.title,
+                content: draft.content,
+                language: draft.language || "id",
+                mode: draft.mode || "journal",
+                provider: "manual",
+                paper_titles: draft.paperTitles || [],
+            })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        
+        draft.inLibrary = true;
+        draft.libraryWorkId = data.work_id;
+        saveDraftsArray(drafts);
+        renderDraftsList();
+        showToast("Draf berhasil dimasukkan ke Library AI (Anti-Plagiasi aktif)!", "success");
+    } catch (e) {
+        showToast("Gagal memasukkan ke Library: " + e.message, "danger");
+    }
+}
+
+async function removeDraftFromAiLibrary(draftId) {
+    const drafts = getSavedDrafts();
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+    
+    try {
+        if (draft.libraryWorkId) {
+            await fetch(`${API_BASE}/api/works/${draft.libraryWorkId}`, { method: "DELETE" });
+        }
+        draft.inLibrary = false;
+        draft.libraryWorkId = null;
+        saveDraftsArray(drafts);
+        renderDraftsList();
+        showToast("Draf dikeluarkan dari Library AI.", "info");
+    } catch (e) {
+        showToast("Gagal menghapus dari Library: " + e.message, "danger");
+    }
+}
+
+function deleteDraft(draftId) {
+    const drafts = getSavedDrafts();
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+    
+    if (confirm(`Apakah Anda yakin ingin menghapus draf "${draft.title}"?`)) {
+        if (draft.inLibrary && draft.libraryWorkId) {
+            fetch(`${API_BASE}/api/works/${draft.libraryWorkId}`, { method: "DELETE" }).catch(() => {});
+        }
+        const updated = drafts.filter(d => d.id !== draftId);
+        saveDraftsArray(updated);
+        renderDraftsList();
+        showToast("Draf berhasil dihapus", "info");
+    }
+}
+
+function clearAllDrafts() {
+    const drafts = getSavedDrafts();
+    if (drafts.length === 0) return;
+    if (confirm("Apakah Anda yakin ingin menghapus semua riwayat draf tersimpan?")) {
+        localStorage.removeItem("autojurnal-saved-drafts");
+        updateDraftsBadge();
+        renderDraftsList();
+        showToast("Semua riwayat draf telah dikosongkan");
+    }
+}
+
+function openDraftsModal() {
+    renderDraftsList();
+    const modalEl = document.getElementById("draftsModal");
+    if (modalEl) {
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+}
+
+function filterDraftsList() {
+    const q = document.getElementById("drafts-search-input")?.value.toLowerCase().trim() || "";
+    renderDraftsList(q);
+}
+
+function renderDraftsList(filterQuery = "") {
+    const container = document.getElementById("drafts-list-container");
+    if (!container) return;
+    
+    const drafts = getSavedDrafts();
+    const filtered = filterQuery
+        ? drafts.filter(d => (d.title && d.title.toLowerCase().includes(filterQuery)) || (d.content && d.content.toLowerCase().includes(filterQuery)))
+        : drafts;
+        
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-journal-x fs-1 text-secondary d-block mb-2"></i>
+                <p class="mb-1">${filterQuery ? "Tidak ada draf yang cocok dengan pencarian." : "Belum ada riwayat draf tersimpan."}</p>
+                <small>Draf yang Anda generate akan otomatis tersimpan di sini.</small>
+            </div>`;
+        return;
+    }
+    
+    container.innerHTML = filtered.map((d) => {
+        const preview = d.content ? escapeHtml(d.content.substring(0, 280)) + (d.content.length > 280 ? "..." : "") : "";
+        const libBadge = d.inLibrary 
+            ? `<span class="badge bg-success me-1" title="Terdaftar di Library AI (Anti-Plagiasi Aktif)"><i class="bi bi-shield-check me-1"></i>Library AI (Anti-Plagiasi)</span>`
+            : `<span class="badge bg-secondary me-1" title="Belum didaftarkan ke Library AI"><i class="bi bi-file-earmark me-1"></i>Lokal</span>`;
+            
+        const libActionBtn = d.inLibrary
+            ? `<button class="btn btn-sm btn-outline-warning" onclick="removeDraftFromAiLibrary('${d.id}')" title="Keluarkan dari Library AI"><i class="bi bi-dash-circle me-1"></i>Hapus dr Library AI</button>`
+            : `<button class="btn btn-sm btn-outline-info" onclick="addDraftToAiLibrary('${d.id}')" title="Daftarkan ke Library AI agar AI tidak plagiasi pada penulisan serupa berikutnya"><i class="bi bi-shield-plus me-1"></i>Jadikan Library AI</button>`;
+            
+        return `
+            <div class="card mb-3 border-secondary bg-dark-subtle shadow-sm">
+                <div class="card-body p-3">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                        <div class="flex-grow-1 me-2">
+                            <h6 class="fw-bold text-primary mb-1">${escapeHtml(d.title)}</h6>
+                            <div class="small text-muted d-flex align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-clock me-1"></i>${d.createdAt}</span>
+                                <span>•</span>
+                                <span><i class="bi bi-file-text me-1"></i>~${d.wordsCount || 0} kata</span>
+                                <span>•</span>
+                                <span class="badge bg-primary-subtle text-primary border border-primary-subtle">${d.mode || "Journal"}</span>
+                                ${libBadge}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-2 mb-3 bg-dark rounded font-monospace small text-light border border-secondary" style="max-height: 90px; overflow-y: hidden; font-size: 0.8rem; line-height: 1.4;">
+                        ${preview}
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div class="d-flex gap-1 flex-wrap">
+                            <button class="btn btn-sm btn-primary font-semibold" onclick="loadDraftToEditor('${d.id}')" title="Buka draf ini ke editor">
+                                <i class="bi bi-box-arrow-in-up-right me-1"></i>Buka Draf
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="regenerateSimilarFromDraft('${d.id}')" title="Generate ulang naskah serupa dengan fitur Anti-Plagiasi AI aktif">
+                                <i class="bi bi-arrow-repeat me-1"></i>Regenerate Serupa (Anti-Plagiasi)
+                            </button>
+                            ${libActionBtn}
+                        </div>
+                        <div class="d-flex gap-1 flex-wrap">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="copyDraftById('${d.id}')" title="Salin naskah beserta diagram">
+                                <i class="bi bi-copy me-1"></i>Copy
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="downloadDraftById('${d.id}')" title="Download Markdown">
+                                <i class="bi bi-download me-1"></i>Download
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteDraft('${d.id}')" title="Hapus draf">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+async function loadDraftToEditor(draftId) {
+    const drafts = getSavedDrafts();
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+    
+    // Close modal
+    const modalEl = document.getElementById("draftsModal");
+    if (modalEl) {
+        bootstrap.Modal.getInstance(modalEl)?.hide();
+    }
+    
+    if (draft.mode && draft.mode.includes("Ide")) {
+        showTab("idea");
+        const editor = document.getElementById("idea-output-editor");
+        if (editor) {
+            editor.value = draft.content;
+            document.getElementById("idea-output-panel").style.display = "";
+            editor.scrollIntoView({ behavior: "smooth" });
+        }
+    } else {
+        showTab("generate");
+        currentJournal = draft.content;
+        document.getElementById("result-section").style.display = "block";
+        document.getElementById("journal-content").innerHTML = renderMarkdown(currentJournal);
+        applyParagraphControls();
+        document.getElementById("journal-content").scrollIntoView({ behavior: "smooth" });
+    }
+    
+    showToast(`Draf "${draft.title}" dimuat ke editor!`, "success");
+}
+
+function regenerateSimilarFromDraft(draftId) {
+    const drafts = getSavedDrafts();
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+    
+    // Close modal
+    const modalEl = document.getElementById("draftsModal");
+    if (modalEl) {
+        bootstrap.Modal.getInstance(modalEl)?.hide();
+    }
+    
+    if (draft.mode && draft.mode.includes("Ide")) {
+        showTab("idea");
+        const topicEl = document.getElementById("idea-search-topic");
+        if (topicEl) topicEl.value = draft.title;
+        const libChk = document.getElementById("idea-library");
+        if (libChk) libChk.checked = true; // Enable anti-plagiarism
+        document.getElementById("idea-direct-search-btn")?.scrollIntoView({ behavior: "smooth" });
+        showToast("Topik disiapkan di tab Ide ke Jurnal dengan mode Library (Anti-Plagiasi) aktif!", "info");
+    } else {
+        showTab("generate");
+        const themeEl = document.getElementById("theme");
+        if (themeEl) themeEl.value = draft.title;
+        const titleEl = document.getElementById("paper-title");
+        if (titleEl) titleEl.value = draft.title;
+        const libChk = document.getElementById("use-library");
+        if (libChk) libChk.checked = true; // Enable anti-plagiarism
+        document.getElementById("search-btn")?.scrollIntoView({ behavior: "smooth" });
+        showToast("Tema disiapkan di tab Generate dengan mode Librarian (Anti-Plagiasi) aktif!", "info");
+    }
+}
+
+async function copyDraftById(draftId) {
+    const drafts = getSavedDrafts();
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+    
+    showToast("Menyiapkan naskah & diagram...", "info");
+    const rawHtml = await prepareHtmlForClipboard(draft.content);
+    await _clipboardWrite(rawHtml, draft.content, "Draf berhasil disalin!");
+}
+
+function downloadDraftById(draftId) {
+    const drafts = getSavedDrafts();
+    const draft = drafts.find(d => d.id === draftId);
+    if (!draft) return;
+    
+    const blob = new Blob([draft.content], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${(draft.title || "draft").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.md`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+
+// ==============================================================================
+// Checkpoints & Session Resume Handlers
+// ==============================================================================
+
+async function checkActiveCheckpoint() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/checkpoints/active`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const banner = document.getElementById("resume-banner");
+        if (!banner) return;
+
+        if (data.has_active && data.checkpoint) {
+            activeCheckpointData = data.checkpoint;
+            const themeEl = document.getElementById("resume-banner-theme");
+            const progressEl = document.getElementById("resume-banner-progress");
+            if (themeEl) themeEl.textContent = data.checkpoint.theme || "Tanpa Judul";
+            if (progressEl) {
+                const modeLabel = data.checkpoint.mode === "textbook" ? "Buku Ajar" : "Jurnal Ilmiah";
+                const unit = data.checkpoint.mode === "textbook" ? "Bab" : "Bagian";
+                progressEl.textContent = `${modeLabel} (${data.checkpoint.current_step}/${data.checkpoint.total_steps} ${unit} selesai · tersimpan ${data.checkpoint.last_updated_human || ''})`;
+            }
+            banner.style.display = "block";
+        } else {
+            activeCheckpointData = null;
+            banner.style.display = "none";
+        }
+    } catch (e) {
+        console.warn("[Checkpoint] Check failed:", e);
+    }
+}
+
+async function resumeActiveCheckpoint() {
+    if (!activeCheckpointData) return;
+    const cp = activeCheckpointData;
+    const modeLabel = cp.mode === "textbook" ? "Buku Ajar" : "Jurnal Ilmiah";
+    const unit = cp.mode === "textbook" ? "Bab" : "Bagian";
+
+    if (!confirm(`Lanjutkan penulisan ${modeLabel} '${cp.theme}' mulai dari ${unit} ${cp.current_step + 1}?`)) {
+        return;
+    }
+
+    // Set theme and mode in UI
+    const themeEl = document.getElementById("theme");
+    if (themeEl) themeEl.value = cp.theme;
+    const modeEl = document.getElementById("mode");
+    if (modeEl && cp.mode) {
+        modeEl.value = cp.mode;
+        toggleMode();
+    }
+    const langEl = document.getElementById("language");
+    if (langEl && cp.language) langEl.value = cp.language;
+
+    // Trigger generate stream with resume=true and session_id
+    showTab("generate");
+    document.getElementById("resume-banner").style.display = "none";
+
+    // Start generation directly in resume mode
+    await startResumeGenerationStream(cp);
+}
+
+async function discardActiveCheckpoint() {
+    if (!activeCheckpointData) return;
+    if (!confirm("Hapus draf terputus ini dan mulai baru?")) return;
+
+    try {
+        await fetch(`${API_BASE}/api/checkpoints/${activeCheckpointData.session_id}`, {
+            method: "DELETE"
+        });
+        activeCheckpointData = null;
+        const banner = document.getElementById("resume-banner");
+        if (banner) banner.style.display = "none";
+        showToast("Checkpoint berhasil dibatalkan.", "info");
+    } catch (e) {
+        showToast("Gagal membatalkan checkpoint: " + e.message, "danger");
+    }
+}
+
+async function startResumeGenerationStream(cp) {
+    clearLogs();
+    document.getElementById("loading-section").style.display = "block";
+    document.getElementById("input-card").style.display = "none";
+    document.getElementById("result-card").style.display = "none";
+
+    const logEl = document.getElementById("log-display");
+    if (logEl) { logEl.style.display = "block"; logEl.innerHTML = ""; }
+
+    updateLoading(
+        `Melanjutkan ${cp.mode === "textbook" ? "Buku Ajar" : "Jurnal"}...`,
+        `Memulihkan dari ${cp.mode === "textbook" ? "Bab" : "Bagian"} ${cp.current_step + 1}`
+    );
+
+    const provider = document.getElementById("provider").value;
+    const providerModel = document.getElementById("provider-model").value.trim() || null;
+    const providerBaseUrl = document.getElementById("provider-base-url").value.trim() || null;
+    const apiKey = document.getElementById("llm-api-key").value.trim() || null;
+
+    const payload = {
+        theme: cp.theme,
+        papers: collectedPapers.length ? collectedPapers : (allPapers.length ? allPapers : []),
+        language: cp.language || "id",
+        provider: provider,
+        provider_model: providerModel,
+        provider_base_url: providerBaseUrl,
+        api_key: apiKey,
+        mode: cp.mode || "journal",
+        multi_agent: cp.mode !== "textbook",
+        num_chapters: cp.total_steps || 14,
+        session_id: cp.session_id,
+        resume: true,
+    };
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/generate/stream`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) throw new Error(await resp.text());
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                    try {
+                        const event = JSON.parse(line.slice(6));
+                        handleStreamEvent(event);
+                    } catch (e) {
+                        console.error("Failed to parse SSE line:", line, e);
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        updateLoading("Generasi Terhenti", err.message, true);
+        showToast("Resume failed: " + err.message.substring(0, 200), "danger");
+    }
+}
+
+
+// ==============================================================================
+// AI Catalog & Multi-Key Router Management Handlers
+// ==============================================================================
+
+async function loadAISettings() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/ai/settings`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        aiCatalog = data.catalog || [];
+        aiSettings = data.providers || {};
+    } catch (e) {
+        console.warn("[AI Settings] Failed to load settings:", e);
+    }
+}
+
+async function openAISettingsModal() {
+    if (!aiCatalog || aiCatalog.length === 0) {
+        await loadAISettings();
+    }
+    renderAIProviderCards();
+    const modalEl = document.getElementById("aiSettingsModal");
+    if (modalEl) {
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+    }
+}
+
+function filterAICategory(cat, btnEl) {
+    currentAICategory = cat;
+    if (btnEl) {
+        document.querySelectorAll("#ai-category-filters button").forEach(b => b.classList.remove("active"));
+        btnEl.classList.add("active");
+    }
+    renderAIProviderCards();
+}
+
+function filterAIProviderList() {
+    renderAIProviderCards();
+}
+
+function renderAIProviderCards() {
+    const container = document.getElementById("ai-providers-container");
+    if (!container) return;
+
+    const searchTerm = (document.getElementById("ai-provider-search")?.value || "").toLowerCase().trim();
+
+    let filtered = aiCatalog.filter(p => {
+        if (currentAICategory !== "all" && p.category !== currentAICategory) {
+            return false;
+        }
+        if (searchTerm) {
+            const nameMatch = (p.name || "").toLowerCase().includes(searchTerm);
+            const idMatch = (p.id || "").toLowerCase().includes(searchTerm);
+            const modelMatch = (p.default_model || "").toLowerCase().includes(searchTerm);
+            return nameMatch || idMatch || modelMatch;
+        }
+        return true;
+    });
+
+    if (!filtered.length) {
+        container.innerHTML = `<div class="col-12 text-center py-4 text-muted">Tidak ada provider AI yang cocok dengan filter.</div>`;
+        return;
+    }
+
+    container.innerHTML = filtered.map(p => {
+        const userCfg = aiSettings[p.id] || {};
+        const savedKey = userCfg.api_key || "";
+        const savedUrl = userCfg.base_url || p.default_base_url || "";
+        const savedModel = userCfg.model || p.default_model || "";
+        const hasKey = Boolean(savedKey || p.category === "local");
+
+        const statusBadge = hasKey
+            ? `<span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-check-circle me-1"></i>Terkonfigurasi</span>`
+            : `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Belum Ada Key</span>`;
+
+        const modelOptions = (p.popular_models || []).map(m => `<option value="${m}">${m}</option>`).join("");
+
+        return `
+        <div class="col-md-6 col-lg-6">
+            <div class="card h-100 shadow-sm border ${hasKey ? 'border-primary-subtle' : 'border-secondary-subtle'}">
+                <div class="card-header d-flex justify-content-between align-items-center py-2 bg-body-tertiary">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi ${p.icon || 'bi-cpu'} fs-5 text-primary"></i>
+                        <span class="font-semibold text-light">${p.name}</span>
+                        ${p.badge ? `<span class="badge bg-secondary small">${p.badge}</span>` : ''}
+                    </div>
+                    <div>${statusBadge}</div>
+                </div>
+                <div class="card-body p-3">
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-1">API Base URL (Endpoint)</label>
+                        <input type="text" class="form-control form-control-sm font-monospace" id="ai-url-${p.id}" value="${savedUrl}" placeholder="${p.default_base_url || 'https://...'}">
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-1">Default Model</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control font-monospace" id="ai-model-${p.id}" value="${savedModel}" placeholder="${p.default_model}">
+                            ${p.popular_models && p.popular_models.length ? `
+                            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" title="Pilih Model Populer"></button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                ${p.popular_models.map(m => `<li><a class="dropdown-item small" href="javascript:void(0)" onclick="document.getElementById('ai-model-${p.id}').value='${m}'">${m}</a></li>`).join('')}
+                            </ul>
+                            ` : ''}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label small text-muted mb-0">
+                                API Key(s) <small class="text-warning">— Multi-Key: pisahkan koma/baris baru</small>
+                            </label>
+                            ${p.doc_url ? `<a href="${p.doc_url}" target="_blank" class="small text-info text-decoration-none"><i class="bi bi-box-arrow-up-right me-1"></i>Get Key</a>` : ''}
+                        </div>
+                        <textarea class="form-control form-control-sm font-monospace" id="ai-key-${p.id}" rows="2" placeholder="${p.category === 'local' ? 'Tidak butuh key untuk Ollama lokal (opsional jika ada token)' : 'sk-... atau key1, key2, key3'}">${savedKey}</textarea>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center pt-1 border-top">
+                        <div id="ai-test-result-${p.id}" class="small text-muted">-</div>
+                        <button class="btn btn-sm btn-outline-info" id="ai-test-btn-${p.id}" onclick="testAIProviderKey('${p.id}')">
+                            <i class="bi bi-activity me-1"></i>Test Ping
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        `;
+    }).join("");
+}
+
+async function testAIProviderKey(pId) {
+    const keyEl = document.getElementById(`ai-key-${pId}`);
+    const urlEl = document.getElementById(`ai-url-${pId}`);
+    const modelEl = document.getElementById(`ai-model-${pId}`);
+    const resEl = document.getElementById(`ai-test-result-${pId}`);
+    const btnEl = document.getElementById(`ai-test-btn-${pId}`);
+
+    if (btnEl) btnEl.disabled = true;
+    if (resEl) resEl.innerHTML = `<span class="spinner-border spinner-border-sm text-info me-1"></span>Menguji...`;
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/ai/test`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                provider_id: pId,
+                api_key: keyEl ? keyEl.value.trim() : null,
+                base_url: urlEl ? urlEl.value.trim() : null,
+                model: modelEl ? modelEl.value.trim() : null,
+            })
+        });
+
+        const data = await resp.json();
+        if (btnEl) btnEl.disabled = false;
+
+        if (data.status === "ok") {
+            if (resEl) resEl.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Aktif (${data.latency_ms}ms)</span>`;
+            showToast(`Koneksi ${pId} berhasil! Latensi: ${data.latency_ms}ms`, "success");
+        } else {
+            if (resEl) resEl.innerHTML = `<span class="text-danger" title="${escapeHtml(data.error || '')}"><i class="bi bi-x-circle-fill me-1"></i>Error</span>`;
+            showToast(`Test ${pId} gagal: ${data.error ? data.error.substring(0, 150) : 'Unknown error'}`, "danger");
+        }
+    } catch (e) {
+        if (btnEl) btnEl.disabled = false;
+        if (resEl) resEl.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Gagal</span>`;
+        showToast("Test request error: " + e.message, "danger");
+    }
+}
+
+async function saveAllAISettings() {
+    const statusEl = document.getElementById("ai-settings-status");
+    if (statusEl) statusEl.textContent = "Menyimpan pengaturan...";
+
+    const updatedProviders = {};
+    aiCatalog.forEach(p => {
+        const keyEl = document.getElementById(`ai-key-${p.id}`);
+        const urlEl = document.getElementById(`ai-url-${p.id}`);
+        const modelEl = document.getElementById(`ai-model-${p.id}`);
+
+        const apiKey = keyEl ? keyEl.value.trim() : "";
+        const baseUrl = urlEl ? urlEl.value.trim() : "";
+        const model = modelEl ? modelEl.value.trim() : "";
+
+        if (apiKey || baseUrl || model) {
+            updatedProviders[p.id] = {
+                api_key: apiKey,
+                base_url: baseUrl || p.default_base_url,
+                model: model || p.default_model,
+            };
+        }
+    });
+
+    const strategy = document.getElementById("ai-router-strategy")?.value || "round-robin";
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/ai/settings`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                providers: updatedProviders,
+                router_strategy: strategy,
+            })
+        });
+
+        if (!resp.ok) throw new Error(await resp.text());
+
+        aiSettings = updatedProviders;
+        if (statusEl) statusEl.textContent = "Pengaturan berhasil disimpan!";
+        showToast("Pengaturan AI Router & API Key berhasil disimpan!", "success");
+
+        // Reload provider list in dropdown
+        await loadProviders();
+    } catch (e) {
+        if (statusEl) statusEl.textContent = "Gagal menyimpan: " + e.message;
+        showToast("Gagal menyimpan pengaturan: " + e.message, "danger");
+    }
+}
+

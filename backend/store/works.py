@@ -84,7 +84,11 @@ class WorkRecord:
 class WorksStore:
     def __init__(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        self.client = QdrantClient(path=str(DATA_DIR / "qdrant"))
+        try:
+            self.client = QdrantClient(path=str(DATA_DIR / "qdrant"))
+        except Exception as e:
+            print(f"[WorksStore] Local Qdrant locked or unavailable ({e}), using in-memory store")
+            self.client = QdrantClient(location=":memory:")
         self._vocab: Optional[dict[str, int]] = None
         self._vectors: Optional[np.ndarray] = None
         self._built = False
@@ -257,6 +261,21 @@ class WorksStore:
                 return True
         return False
 
+    def get_work(self, work_id: str) -> Optional[dict]:
+        scroll = self.client.scroll(
+            collection_name=COLLECTION,
+            with_payload=True,
+            with_vectors=False,
+            limit=10000,
+        )
+        for pt in scroll[0]:
+            if pt.payload.get("work_id") == work_id:
+                rec = WorkRecord.from_payload(pt.payload)
+                d = rec.to_dict()
+                d["content"] = rec.content
+                return d
+        return None
+
     def count(self) -> int:
         return self.client.count(collection_name=COLLECTION).count
 
@@ -286,5 +305,22 @@ def format_previous_works_context(works: list[WorkRecord]) -> str:
     )
 
 
+class _LazyWorksStore:
+    """Creates the WorksStore lazily on first use.
+
+    See _LazyStore in rag/store.py: creating the store eagerly at import time
+    conflicts with uvicorn --reload's spawn subprocess, which re-imports this
+    module in a second process and hits Qdrant's exclusive file lock.
+    """
+
+    def __init__(self) -> None:
+        self.__dict__["_instance"] = None
+
+    def __getattr__(self, name: str):
+        if self.__dict__.get("_instance") is None:
+            self.__dict__["_instance"] = WorksStore()
+        return getattr(self.__dict__["_instance"], name)
+
+
 # Shared singleton
-store = WorksStore()
+store = _LazyWorksStore()

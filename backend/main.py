@@ -24,6 +24,7 @@ from search.openalex import OpenAlexSearcher, Paper
 from generator.journal import build_system_prompt, build_part_prompt, count_parts
 from generator.agents import generate_multi_agent
 from generator.textbook import generate_textbook
+from generator.memory import is_context_overflow_error, compress_prompt_for_retry
 from providers import get_provider, list_providers
 from rag.scraper import scrape_all
 from rag.store import store
@@ -50,15 +51,38 @@ def clean_query(q: str) -> str:
     return " ".join(q.split())
 
 
+def _format_author_name(name: str) -> str:
+    name = name.strip()
+    if not name:
+        return "Unknown"
+    if "," in name:
+        return name
+    parts = name.split()
+    if len(parts) == 1:
+        return parts[0]
+    suffixes = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv"}
+    if len(parts) > 2 and parts[-1].lower() in suffixes:
+        last = f"{parts[-2]} {parts[-1]}"
+        firsts = parts[:-2]
+    else:
+        last = parts[-1]
+        firsts = parts[:-1]
+    
+    initials = " ".join(f"{f[0].upper()}." for f in firsts if f)
+    if initials:
+        return f"{last}, {initials}"
+    return last
+
+
 def format_reference(p: Paper) -> str:
-    if len(p.authors) == 0:
+    if not p.authors:
         author_str = "Unknown"
     elif len(p.authors) == 1:
-        author_str = p.authors[0]
+        author_str = _format_author_name(p.authors[0])
     elif len(p.authors) == 2:
-        author_str = f"{p.authors[0]} & {p.authors[1]}"
+        author_str = f"{_format_author_name(p.authors[0])} & {_format_author_name(p.authors[1])}"
     else:
-        author_str = f"{p.authors[0]} et al."
+        author_str = f"{_format_author_name(p.authors[0])} et al."
 
     year = p.year or "n.d."
 
@@ -174,12 +198,8 @@ def replace_references(journal: str, papers: list[Paper], language: str) -> str:
         if idx != -1:
             heading = alt
 
-    def sort_key(p: Paper) -> str:
-        first = p.authors[0] if p.authors else "Unknown"
-        last = first.rsplit(" ", 1)[-1]
-        return last.lower()
-
-    sorted_papers = sorted(papers, key=sort_key)
+    # Sort strictly alphabetically (A-Z) by formatted citation string
+    sorted_papers = sorted(papers, key=lambda p: format_reference(p).strip().lower())
     refs = "\n\n".join(format_reference(p) for p in sorted_papers)
 
     if idx == -1:
@@ -233,6 +253,8 @@ class GenerateRequest(BaseModel):
     draft_idea: Optional[str] = Field(default=None, description="Extracted draft idea to guide the writing agents")
     paradigm: Optional[str] = Field(default=None, description="Preferred qualitative research paradigm")
     analysis_method: Optional[str] = Field(default=None, description="Preferred qualitative research analysis method")
+    session_id: Optional[str] = Field(default=None, description="Session ID untuk tracking & checkpointing")
+    resume: bool = Field(default=False, description="Whether to resume from existing checkpoint")
 
 
 class IdeaParseResponse(BaseModel):
@@ -323,6 +345,15 @@ class WorksDeleteResponse(BaseModel):
     status: str
 
 
+class SaveWorkRequest(BaseModel):
+    theme: str
+    content: str
+    language: str = "id"
+    mode: str = "journal"
+    provider: Optional[str] = "manual"
+    paper_titles: list[str] = []
+
+
 class ProviderInfo(BaseModel):
     id: str
     name: str
@@ -366,6 +397,140 @@ async def save_settings(req: SaveSettingsRequest):
     env_path.write_text("".join(lines), encoding="utf-8")
     print(f"[Settings] Saved {env_var} to .env")
     return {"status": "ok"}
+
+
+# ---- AI Catalog & Router Settings Endpoints ----
+
+from providers.catalog import get_catalog_list, get_catalog_entry
+from providers.factory import load_user_ai_settings, save_user_ai_settings
+from checkpoint import (
+    get_latest_active_checkpoint,
+    load_checkpoint,
+    delete_checkpoint,
+    list_checkpoints,
+)
+
+
+@app.get("/api/ai/catalog")
+async def get_ai_catalog():
+    """Mengembalikan katalog lengkap preset AI provider."""
+    return get_catalog_list()
+
+
+@app.get("/api/ai/settings")
+async def get_ai_settings():
+    """Mengembalikan konfigurasi custom AI provider yang tersimpan."""
+    user_cfg = load_user_ai_settings()
+    return {
+        "providers": user_cfg,
+        "catalog": get_catalog_list(),
+    }
+
+
+class SaveAISettingsPayload(BaseModel):
+    providers: dict
+    active_provider: Optional[str] = None
+    router_strategy: str = "round-robin"
+
+
+@app.post("/api/ai/settings")
+async def update_ai_settings(payload: SaveAISettingsPayload):
+    """Menyimpan konfigurasi multi-key & endpoint provider ke ai_settings.json dan .env."""
+    save_user_ai_settings(payload.providers)
+
+    # Sinkronkan ke .env jika ada perubahan key
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        env_dict = {}
+        for p_id, p_cfg in payload.providers.items():
+            entry = get_catalog_entry(p_id)
+            env_key = entry.get("key_env")
+            if env_key and p_cfg.get("api_key"):
+                env_dict[env_key] = p_cfg.get("api_key")
+
+        for i, line in enumerate(lines):
+            line_strip = line.strip()
+            for k, v in env_dict.items():
+                if line_strip.startswith(f"{k}="):
+                    lines[i] = f"{k}={v}\n"
+                    env_dict[k] = None
+
+        for k, v in env_dict.items():
+            if v is not None:
+                lines.append(f"\n{k}={v}\n")
+
+        env_path.write_text("".join(lines), encoding="utf-8")
+
+    return {"status": "ok", "message": "Settings saved successfully"}
+
+
+class TestAIKeyPayload(BaseModel):
+    provider_id: str
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+
+
+@app.post("/api/ai/test")
+async def test_ai_key(payload: TestAIKeyPayload):
+    """Menguji validitas dan latensi API Key / endpoint."""
+    import time
+    provider_inst = get_provider(
+        payload.provider_id,
+        api_key=payload.api_key,
+        base_url=payload.base_url,
+        model=payload.model,
+    )
+    if not provider_inst:
+        raise HTTPException(status_code=400, detail=f"Cannot initialize provider '{payload.provider_id}'")
+
+    t_start = time.time()
+    try:
+        res = await asyncio.wait_for(
+            provider_inst.generate("Respond with the single word 'OK'", system_prompt="You are a ping test assistant."),
+            timeout=15.0,
+        )
+        latency_ms = round((time.time() - t_start) * 1000, 1)
+        return {
+            "status": "ok",
+            "latency_ms": latency_ms,
+            "response": res.strip()[:100],
+        }
+    except Exception as e:
+        latency_ms = round((time.time() - t_start) * 1000, 1)
+        return {
+            "status": "error",
+            "latency_ms": latency_ms,
+            "error": str(e)[:300],
+        }
+
+
+# ---- Checkpoint & Resume Endpoints ----
+
+@app.get("/api/checkpoints/active")
+async def get_active_checkpoint_endpoint():
+    """Mengecek apakah ada proses generasi terputus yang dapat dilanjutkan."""
+    cp = get_latest_active_checkpoint()
+    if not cp:
+        return {"has_active": False, "checkpoint": None}
+    return {
+        "has_active": True,
+        "checkpoint": cp,
+    }
+
+
+@app.get("/api/checkpoints")
+async def get_all_checkpoints():
+    """Mendaftar semua checkpoint yang tersimpan."""
+    return list_checkpoints()
+
+
+@app.delete("/api/checkpoints/{session_id}")
+async def remove_checkpoint(session_id: str):
+    """Menghapus checkpoint tertentu."""
+    success = delete_checkpoint(session_id)
+    return {"status": "ok" if success else "not_found"}
 
 
 @app.get("/api/providers", response_model=list[ProviderInfo])
@@ -531,7 +696,15 @@ async def generate_journal(req: GenerateRequest):
                     rag_context=rag_context, has_data=req.has_data, user_data=req.user_data,
                     draft_idea=req.draft_idea,
                 )
-                part_text = await provider.generate(prompt, system_prompt=system_prompt)
+                try:
+                    part_text = await provider.generate(prompt, system_prompt=system_prompt)
+                except Exception as gen_err:
+                    if is_context_overflow_error(gen_err):
+                        print(f"[ContextOverflow] Provider '{provider.name}' error in part {part}: {gen_err}. Retrying with compressed prompt...")
+                        comp_sys, comp_prompt = compress_prompt_for_retry(system_prompt, prompt, lang=req.language)
+                        part_text = await provider.generate(comp_prompt, system_prompt=comp_sys)
+                    else:
+                        raise
 
                 if part != num_parts:
                     for marker in ["\n## References", "\nReferences", "\n## Daftar Pustaka", "\nDaftar Pustaka"]:
@@ -558,24 +731,28 @@ async def generate_journal(req: GenerateRequest):
         journal = replace_references(journal, papers, req.language)
         journal = _strip_inline_references(journal)
 
-        # Save to library if enabled
+        # Save to library if enabled (isolated error handling)
         if req.library:
-            paper_titles = [getattr(p, "title", "") or "" for p in papers]
-            work = WorkRecord(
-                work_id=str(uuid.uuid4()),
-                theme=req.theme,
-                content=journal,
-                language=req.language,
-                mode=req.mode or "journal",
-                provider=provider.display_name,
-                paper_titles=paper_titles,
-            )
-            works_store.save_work(work)
-            print(f"[Librarian] Saved work '{work.work_id[:8]}'")
-    except Exception as e:
-        print(f"[Librarian] Save error: {e}")
+            try:
+                paper_titles = [getattr(p, "title", "") or "" for p in papers]
+                work = WorkRecord(
+                    work_id=str(uuid.uuid4()),
+                    theme=req.theme,
+                    content=journal,
+                    language=req.language,
+                    mode=req.mode or "journal",
+                    provider=provider.display_name,
+                    paper_titles=paper_titles,
+                )
+                works_store.save_work(work)
+                print(f"[Librarian] Saved work '{work.work_id[:8]}'")
+            except Exception as lib_e:
+                print(f"[Librarian] Save error: {lib_e}")
 
-    return GenerateResponse(journal=journal, provider_used=provider.display_name, token_usage=token_usage)
+        return GenerateResponse(journal=journal, provider_used=provider.display_name, token_usage=token_usage)
+    except Exception as e:
+        print(f"[Generate] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 
 @app.post("/api/generate/stream")
@@ -665,6 +842,8 @@ async def generate_journal_stream(req: GenerateRequest):
             draft_idea=req.draft_idea,
             paradigm=req.paradigm,
             analysis_method=req.analysis_method,
+            session_id=req.session_id,
+            resume=req.resume,
         ))
 
         while True:
@@ -691,9 +870,13 @@ async def _run_generation(
     mode, multi_agent, template, has_data, user_data, log_queue,
     previous_works_ctx="", do_library=False, draft_idea=None,
     paradigm=None, analysis_method=None,
+    session_id=None, resume=False,
 ):
     try:
         prev_ctx = previous_works_ctx
+        resume_cp = None
+        if resume:
+            resume_cp = load_checkpoint(session_id) if session_id else get_latest_active_checkpoint()
 
         if mode == "textbook":
             journal, token_usage = await generate_textbook(
@@ -702,6 +885,8 @@ async def _run_generation(
                 template=template, has_data=has_data, user_data=user_data,
                 log_queue=log_queue, previous_works_ctx=prev_ctx,
                 draft_idea=draft_idea,
+                session_id=session_id,
+                resume_checkpoint=resume_cp,
             )
             token_usage["estimated"] = True
         elif multi_agent:
@@ -712,6 +897,8 @@ async def _run_generation(
                 log_queue=log_queue, previous_works_ctx=prev_ctx,
                 draft_idea=draft_idea,
                 paradigm=paradigm, analysis_method=analysis_method,
+                session_id=session_id,
+                resume_checkpoint=resume_cp,
             )
             token_usage["estimated"] = True
         else:
@@ -737,7 +924,15 @@ async def _run_generation(
                     rag_context=rag_context, has_data=has_data, user_data=user_data,
                     draft_idea=draft_idea,
                 )
-                part_text = await provider.generate(prompt, system_prompt=system_prompt)
+                try:
+                    part_text = await provider.generate(prompt, system_prompt=system_prompt)
+                except Exception as gen_err:
+                    if is_context_overflow_error(gen_err):
+                        print(f"[ContextOverflow] Stream generation '{provider.name}' error in part {part}: {gen_err}. Retrying with compressed prompt...")
+                        comp_sys, comp_prompt = compress_prompt_for_retry(system_prompt, prompt, lang=language)
+                        part_text = await provider.generate(comp_prompt, system_prompt=comp_sys)
+                    else:
+                        raise
 
                 if part != num_parts:
                     for marker in ["\n## References", "\nReferences", "\n## Daftar Pustaka", "\nDaftar Pustaka"]:
@@ -1472,6 +1667,31 @@ Guidelines text:
 async def list_works(limit: int = 50, offset: int = 0):
     works = works_store.list_works(limit=limit, offset=offset)
     return WorksListResponse(works=works, total=len(works))
+
+
+@app.get("/api/works/{work_id}")
+async def get_work_endpoint(work_id: str):
+    if not work_id.strip():
+        raise HTTPException(status_code=400, detail="work_id is required")
+    work = works_store.get_work(work_id)
+    if not work:
+        raise HTTPException(status_code=404, detail="Work not found")
+    return work
+
+
+@app.post("/api/works")
+async def save_work_endpoint(req: SaveWorkRequest):
+    work = WorkRecord(
+        work_id=str(uuid.uuid4()),
+        theme=req.theme,
+        content=req.content,
+        language=req.language,
+        mode=req.mode,
+        provider=req.provider or "manual",
+        paper_titles=req.paper_titles,
+    )
+    works_store.save_work(work)
+    return {"status": "saved", "work_id": work.work_id}
 
 
 @app.delete("/api/works/{work_id}", response_model=WorksDeleteResponse)

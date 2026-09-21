@@ -474,11 +474,33 @@ class TestAIKeyPayload(BaseModel):
 
 @app.post("/api/ai/test")
 async def test_ai_key(payload: TestAIKeyPayload):
-    """Menguji validitas dan latensi API Key / endpoint."""
+    """Menguji validitas dan latensi API Key / endpoint dengan pesan diagnostik yang ramah."""
     import time
+    from backend.providers.catalog import get_catalog_entry
+    from backend.providers.factory import load_user_ai_settings
+
+    p_id = payload.provider_id
+    cat_entry = get_catalog_entry(p_id)
+    is_local = (cat_entry.get("category") == "local") if cat_entry else (p_id in ["ollama", "lmstudio", "vllm", "localai"])
+
+    # Cek apakah API Key diwajibkan tapi belum diisi
+    user_key = (payload.api_key or "").strip()
+    saved_cfg = load_user_ai_settings().get(p_id, {})
+    saved_key = (saved_cfg.get("api_key") or "").strip()
+    env_key = getattr(settings, f"{p_id}_api_key", None) or (getattr(settings, cat_entry.get("key_env", "").lower(), None) if cat_entry else None)
+
+    active_key = user_key or saved_key or env_key
+
+    if not is_local and (not active_key or active_key in ["no-key", "sk-..."]):
+        return {
+            "status": "error",
+            "latency_ms": 0,
+            "error": "API Key belum diisi. Masukkan API Key Anda di kolom di atas lalu klik Test Ping.",
+        }
+
     provider_inst = get_provider(
         payload.provider_id,
-        api_key=payload.api_key,
+        api_key=active_key if active_key else None,
         base_url=payload.base_url,
         model=payload.model,
     )
@@ -497,12 +519,36 @@ async def test_ai_key(payload: TestAIKeyPayload):
             "latency_ms": latency_ms,
             "response": res.strip()[:100],
         }
-    except Exception as e:
+    except asyncio.TimeoutError:
         latency_ms = round((time.time() - t_start) * 1000, 1)
         return {
             "status": "error",
             "latency_ms": latency_ms,
-            "error": str(e)[:300],
+            "error": "Permintaan timeout (>15 detik). Endpoint lambat merespons atau tidak terjangkau.",
+        }
+    except Exception as e:
+        latency_ms = round((time.time() - t_start) * 1000, 1)
+        err_str = str(e)
+        err_lower = err_str.lower()
+
+        if "connection refused" in err_lower or "failed to connect" in err_lower or "connecterror" in err_lower:
+            if is_local or p_id == "ollama":
+                friendly_err = f"Layanan lokal '{p_id}' belum aktif di {payload.base_url or 'localhost:11434'}. Pastikan aplikasi sudah dijalankan (misal: 'ollama serve')."
+            else:
+                friendly_err = f"Tidak dapat terhubung ke {payload.base_url or 'server API'}. Periksa koneksi internet."
+        elif "401" in err_str or "unauthorized" in err_lower or "invalid api key" in err_lower or "incorrect api key" in err_lower:
+            friendly_err = "API Key tidak valid / ditolak oleh server (401 Unauthorized). Periksa kembali API Key Anda."
+        elif "429" in err_str or "quota" in err_lower or "rate limit" in err_lower or "resource_exhausted" in err_lower:
+            friendly_err = "Kuota / Rate Limit habis (429). Saldo akun habis atau limit per menit tercapai."
+        elif "not found" in err_lower or "404" in err_str or "does not exist" in err_lower:
+            friendly_err = f"Model '{payload.model or 'default'}' tidak ditemukan di provider. Coba pilih model lain."
+        else:
+            friendly_err = err_str[:250]
+
+        return {
+            "status": "error",
+            "latency_ms": latency_ms,
+            "error": friendly_err,
         }
 
 

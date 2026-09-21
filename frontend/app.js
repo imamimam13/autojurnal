@@ -3226,17 +3226,19 @@ async function testAIProviderKey(pId) {
         if (btnEl) btnEl.disabled = false;
 
         if (data.status === "ok") {
-            if (resEl) resEl.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Aktif (${data.latency_ms}ms)</span>`;
+            if (resEl) resEl.innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>Aktif (${data.latency_ms}ms)</span>`;
             showToast(`Koneksi ${pId} berhasil! Latensi: ${data.latency_ms}ms`, "success");
         } else {
-            if (resEl) resEl.innerHTML = `<span class="text-danger" title="${escapeHtml(data.error || '')}"><i class="bi bi-x-circle-fill me-1"></i>Error</span>`;
-            showToast(`Test ${pId} gagal: ${data.error ? data.error.substring(0, 150) : 'Unknown error'}`, "danger");
+            const shortErr = data.error ? (data.error.length > 50 ? data.error.substring(0, 48) + '...' : data.error) : 'Error';
+            if (resEl) resEl.innerHTML = `<span class="text-danger small" title="${escapeHtml(data.error || '')}"><i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(shortErr)}</span>`;
+            showToast(`Test ${pId}: ${data.error || 'Gagal terhubung'}`, "danger");
         }
     } catch (e) {
         if (btnEl) btnEl.disabled = false;
-        if (resEl) resEl.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Gagal</span>`;
+        if (resEl) resEl.innerHTML = `<span class="text-danger small"><i class="bi bi-x-circle-fill me-1"></i>Gagal (${escapeHtml(e.message)})</span>`;
         showToast("Test request error: " + e.message, "danger");
     }
+
 }
 
 async function saveAllAISettings() {

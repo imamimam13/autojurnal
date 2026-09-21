@@ -3288,3 +3288,25 @@ async function saveAllAISettings() {
     }
 }
 
+function openInstallModal(platform = 'macos') {
+    const modalEl = document.getElementById("installModal");
+    if (!modalEl) return;
+    const modal = new bootstrap.Modal(modalEl);
+
+    if (platform === 'windows') {
+        const winTabBtn = document.getElementById("tab-win-btn");
+        if (winTabBtn) {
+            const trigger = new bootstrap.Tab(winTabBtn);
+            trigger.show();
+        }
+    } else {
+        const macTabBtn = document.getElementById("tab-mac-btn");
+        if (macTabBtn) {
+            const trigger = new bootstrap.Tab(macTabBtn);
+            trigger.show();
+        }
+    }
+
+    modal.show();
+}
+

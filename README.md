@@ -76,36 +76,36 @@ Each section (Judul/Abstrak, Pendahuluan, Tinjauan Pustaka, Metode, Temuan, Penu
 
 ## Quick Start & Installation
 
-### 🍎 macOS / Linux (1-Click Installer)
+### 🍎 macOS (Apple Silicon M1/M2/M3/M4 & Intel)
 
 1. **Jalankan Installer:**
    ```bash
-   ./install.sh
+   ./install-macos.sh
    ```
-   *Script ini otomatis menyiapkan environment, menginstal dependensi, dan meng-compile `AutoJurnal.app`.*
+   *Script ini otomatis menyiapkan environment Python, menginstal dependensi, dan meng-compile bundle aplikasi native `AutoJurnal.app`.*
 
 2. **Jalankan Aplikasi:**
    - **Double-click** file **`AutoJurnal.app`** di folder project (atau pindahkan ke `/Applications` / Desktop).
    - *Aplikasi langsung terbuka dalam Dedicated App Window (tanpa address bar browser).*
-   - **Atau via terminal:** `./run.sh`
+   - **Atau via terminal:** `./run-macos.sh`
 
 3. **Hentikan Aplikasi:**
-   - Klik ganda `AutoJurnal.app` lalu pilih **Hentikan Server**, atau jalankan `./stop.sh`.
+   - Klik ganda `AutoJurnal.app` lalu pilih **Hentikan Server**, atau jalankan `./stop-macos.sh`.
 
 ---
 
-### 🪟 Windows (1-Click Installer)
+### 🪟 Windows 10 / 11
 
 1. **Jalankan Installer:**
-   - Double-click **`install.bat`**
+   - Double-click **`install-windows.bat`**
    - *Script akan otomatis mengecek Python, membuat virtual environment, menginstal dependensi, dan membuat shortcut **AutoJurnal** di Desktop Windows Anda.*
 
 2. **Jalankan Aplikasi:**
-   - **Double-click shortcut `AutoJurnal` di Desktop Anda** (atau double-click `run.bat`).
+   - **Double-click shortcut `AutoJurnal` di Desktop Anda** (atau double-click `run-windows.bat`).
    - *Aplikasi langsung terbuka dalam Native App Window (Microsoft Edge / Google Chrome App Mode).*
 
 3. **Hentikan Aplikasi:**
-   - Double-click **`stop.bat`**
+   - Double-click **`stop-windows.bat`**
 
 ---
 

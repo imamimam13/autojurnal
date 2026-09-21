@@ -11,11 +11,21 @@
 </head>
 <body>
     <nav class="navbar navbar-dark border-bottom">
-        <div class="container">
-            <span class="navbar-brand mb-0 h1">
-                <i class="bi bi-journal-text me-2"></i>AutoJurnal
-            </span>
-            <span class="badge bg-secondary">v1.0</span>
+        <div class="container d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2">
+                <span class="navbar-brand mb-0 h1">
+                    <i class="bi bi-journal-text me-2"></i>AutoJurnal
+                </span>
+                <span class="badge bg-secondary">v1.0</span>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <button class="btn btn-sm btn-outline-light d-flex align-items-center gap-1" onclick="openInstallModal('macos')" title="Petunjuk & Installer Native macOS">
+                    <i class="bi bi-apple"></i> <span>Install Mac (.app)</span>
+                </button>
+                <button class="btn btn-sm btn-outline-info d-flex align-items-center gap-1" onclick="openInstallModal('windows')" title="Petunjuk & Installer Native Windows">
+                    <i class="bi bi-windows"></i> <span>Install Windows (.bat)</span>
+                </button>
+            </div>
         </div>
     </nav>
 
@@ -1060,7 +1070,105 @@ Or Markdown table:
                                     <div class="text-center py-4 text-muted">Memuat daftar draf...</div>
                                 </div>
                             </div>
-                            <div class="modal-footer">
+                <!-- Native App Installer Modal -->
+                <div class="modal fade" id="installModal" tabindex="-1" aria-labelledby="installModalLabel" aria-hidden="true">
+                    <div class="modal-dialog modal-lg modal-dialog-centered">
+                        <div class="modal-content border-secondary shadow">
+                            <div class="modal-header border-bottom">
+                                <h5 class="modal-title d-flex align-items-center gap-2" id="installModalLabel">
+                                    <i class="bi bi-download text-primary"></i>
+                                    <span>Panduan Instalasi & Native App Launcher</span>
+                                </h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <ul class="nav nav-pills nav-fill mb-3" id="installerTabs" role="tablist">
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link active d-flex align-items-center justify-content-center gap-2" id="tab-mac-btn" data-bs-toggle="pill" data-bs-target="#tab-mac-pane" type="button" role="tab">
+                                            <i class="bi bi-apple fs-5"></i> <span>macOS (Apple Silicon & Intel)</span>
+                                        </button>
+                                    </li>
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link d-flex align-items-center justify-content-center gap-2" id="tab-win-btn" data-bs-toggle="pill" data-bs-target="#tab-win-pane" type="button" role="tab">
+                                            <i class="bi bi-windows fs-5"></i> <span>Windows 10 / 11</span>
+                                        </button>
+                                    </li>
+                                </ul>
+
+                                <div class="tab-content" id="installerTabsContent">
+                                    <!-- macOS Tab Pane -->
+                                    <div class="tab-pane fade show active" id="tab-mac-pane" role="tabpanel">
+                                        <div class="card bg-dark border-secondary mb-3">
+                                            <div class="card-body">
+                                                <h6 class="text-white fw-bold mb-2 d-flex align-items-center gap-2">
+                                                    <span class="badge bg-primary">Opsi 1</span> 1-Click Native App (.app)
+                                                </h6>
+                                                <p class="text-muted small mb-2">
+                                                    Di macOS, Anda bisa langsung menjalankan file <code>AutoJurnal.app</code> yang ada di folder project. Aplikasi akan terbuka di window native (tanpa URL bar).
+                                                </p>
+                                                <div class="bg-black p-2 rounded small text-light font-monospace mb-2">
+                                                    Double-click <strong>AutoJurnal.app</strong> (bisa disalin ke /Applications atau Desktop)
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="card bg-dark border-secondary">
+                                            <div class="card-body">
+                                                <h6 class="text-white fw-bold mb-2 d-flex align-items-center gap-2">
+                                                    <span class="badge bg-secondary">Opsi 2</span> Terminal Auto-Installer
+                                                </h6>
+                                                <p class="text-muted small mb-2">
+                                                    Script otomatis untuk setup virtual environment Python, dependensi, dan compile AutoJurnal.app:
+                                                </p>
+                                                <div class="bg-black p-2 rounded small text-light font-monospace d-flex justify-content-between align-items-center">
+                                                    <code>./install-macos.sh</code>
+                                                    <button class="btn btn-sm btn-outline-secondary" onclick="navigator.clipboard.writeText('./install-macos.sh'); showToast('Perintah dicopy!');">
+                                                        <i class="bi bi-clipboard"></i> Copy
+                                                    </button>
+                                                </div>
+                                                <div class="mt-2 text-muted small">
+                                                    Jalankan server: <code>./run-macos.sh</code> | Hentikan server: <code>./stop-macos.sh</code>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Windows Tab Pane -->
+                                    <div class="tab-pane fade" id="tab-win-pane" role="tabpanel">
+                                        <div class="card bg-dark border-secondary mb-3">
+                                            <div class="card-body">
+                                                <h6 class="text-white fw-bold mb-2 d-flex align-items-center gap-2">
+                                                    <span class="badge bg-info text-dark">Opsi 1</span> 1-Click Installer (Desktop Shortcut)
+                                                </h6>
+                                                <p class="text-muted small mb-2">
+                                                    Klik ganda file <code>install-windows.bat</code>. Script akan otomatis menyiapkan Python, menginstal library, dan <strong>membuat shortcut AutoJurnal di Desktop Windows</strong>.
+                                                </p>
+                                                <div class="bg-black p-2 rounded small text-light font-monospace mb-2">
+                                                    Double-click <strong>install-windows.bat</strong> di folder project
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="card bg-dark border-secondary">
+                                            <div class="card-body">
+                                                <h6 class="text-white fw-bold mb-2 d-flex align-items-center gap-2">
+                                                    <span class="badge bg-secondary">Opsi 2</span> Windows Launcher (Standalone App Mode)
+                                                </h6>
+                                                <p class="text-muted small mb-2">
+                                                    Menjalankan AutoJurnal langsung di window Microsoft Edge / Google Chrome tanpa address bar:
+                                                </p>
+                                                <div class="bg-black p-2 rounded small text-light font-monospace mb-2">
+                                                    Double-click <strong>run-windows.bat</strong>
+                                                </div>
+                                                <div class="text-muted small">
+                                                    Hentikan server: Double-click <code>stop-windows.bat</code>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer border-top">
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
                             </div>
                         </div>

@@ -28,14 +28,30 @@ fi
 PY_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 echo "   ✅ Python terdeteksi: versi $PY_VERSION ($($PYTHON_CMD --version))"
 
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ]; then
+    echo "   🍏 Arsitektur: Apple Silicon ($ARCH)"
+    export ARCHFLAGS="-arch arm64"
+else
+    echo "   💻 Arsitektur: Intel ($ARCH)"
+    export ARCHFLAGS="-arch x86_64"
+fi
+
 # 2. Setup Virtual Environment
 echo ""
 echo "📦 2/5 Menyiapkan Virtual Environment (venv)..."
-if [ ! -d "venv" ]; then
+if [ -d "venv" ]; then
+    # Test apakah python venv bisa dieksekusi tanpa frozen importlib error
+    if ! ./venv/bin/python -c "import sys" &>/dev/null; then
+        echo "   ⚠️ Virtual environment lama tidak kompatibel / rusak. Membuat ulang venv bersih..."
+        rm -rf venv
+        $PYTHON_CMD -m venv venv
+    else
+        echo "   Virtual environment siap."
+    fi
+else
     echo "   Membuat venv baru..."
     $PYTHON_CMD -m venv venv
-else
-    echo "   Virtual environment sudah ada."
 fi
 
 # 3. Install Dependencies
@@ -45,7 +61,8 @@ export MPLCONFIGDIR=/tmp/matplotlib
 export MPLBACKEND=Agg
 mkdir -p /tmp/matplotlib
 
-./venv/bin/pip install -q -r backend/requirements.txt || echo "   (Catatan: Gunakan koneksi internet jika ada library baru yang perlu diunduh)"
+./venv/bin/pip install --prefer-binary --timeout 15 --retries 1 -q --upgrade pip setuptools wheel 2>/dev/null || true
+./venv/bin/pip install --prefer-binary --timeout 15 --retries 1 -q -r backend/requirements.txt || echo "   (Catatan: Gunakan koneksi internet jika ada library baru yang perlu diunduh)"
 echo "   ✅ Dependensi terverifikasi."
 
 # 4. Inisialisasi Konfigurasi .env

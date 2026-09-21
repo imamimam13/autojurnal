@@ -158,6 +158,11 @@ register_provider("ollama", "backend.providers.ollama", "OllamaProvider", {
     "base_url": settings.ollama_base_url,
     "model": settings.ollama_model
 })
+register_provider("ollama_cloud", "backend.providers.ollama", "OllamaProvider", {
+    "api_key": settings.ollama_cloud_api_key,
+    "base_url": settings.ollama_cloud_base_url,
+    "model": settings.ollama_cloud_model
+})
 register_provider("openai", "backend.providers.openai_provider", "OpenAIProvider", {
     "api_key": settings.openai_api_key,
     "model": settings.openai_model

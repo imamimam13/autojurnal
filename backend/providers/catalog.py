@@ -554,9 +554,9 @@ AI_CATALOG: Dict[str, Dict[str, Any]] = {
     # --------------------------------------------------------------------------
     "ollama": {
         "id": "ollama",
-        "name": "Ollama (Local / Remote Cloud)",
+        "name": "Ollama (Local Offline)",
         "category": "local",
-        "badge": "Local & Multi-Host",
+        "badge": "Localhost (Tanpa Internet)",
         "icon": "bi-laptop",
         "type": "ollama",
         "default_base_url": "http://localhost:11434",
@@ -566,9 +566,30 @@ AI_CATALOG: Dict[str, Dict[str, Any]] = {
             "llama3.3",
             "qwen2.5:14b",
             "deepseek-r1:14b",
-            "gemma4:31b"
+            "gemma4:31b",
+            "mistral",
+            "phi4"
         ],
         "key_env": "OLLAMA_API_KEY",
+        "doc_url": "https://ollama.com"
+    },
+    "ollama_cloud": {
+        "id": "ollama_cloud",
+        "name": "Ollama (Remote Cloud / VPS)",
+        "category": "global",
+        "badge": "Cloud Server",
+        "icon": "bi-cloud-check",
+        "type": "ollama",
+        "default_base_url": "https://your-ollama-server.com",
+        "default_model": "gemma3:12b",
+        "popular_models": [
+            "gemma3:12b",
+            "llama3.3",
+            "qwen2.5:72b",
+            "deepseek-r1:70b",
+            "mistral-large"
+        ],
+        "key_env": "OLLAMA_CLOUD_API_KEY",
         "doc_url": "https://ollama.com"
     },
     "lmstudio": {

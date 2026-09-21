@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     ollama_model: str = "gemma3:12b"
     ollama_api_key: Optional[str] = None
 
+    ollama_cloud_base_url: Optional[str] = "https://your-ollama-server.com"
+    ollama_cloud_model: str = "gemma3:12b"
+    ollama_cloud_api_key: Optional[str] = None
+
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
 
